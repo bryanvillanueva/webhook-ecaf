@@ -1,12 +1,13 @@
 const express = require('express');
 const bodyParser = require('body-parser');
-const axios = require('axios'); // Para enviar solicitudes a Make
+const axios = require('axios'); // Para enviar solicitudes
 
 const app = express();
 app.use(bodyParser.json());
 
 // Token de verificación
 const VERIFY_TOKEN = 'mi_token_secreto';
+const ACCESS_TOKEN = 'EAAG8R2yWJOwBO8elKtdEZCMOZA5VNiSZAfgybZBNaWXP9mDPtGWI7HrBphT7qoUute9CxNAmwWTksfjj85wyIWNhB0rsCAdHmEMLu8SV7h33XBI5baMNoUxJ1NV2IYSqGcpNLdjd4pYQIgLJQRSB5ZCZAYf49bQFMOBXx3sdYN2iUfztXZBkQawN44ZBR3dmxRyVnDeVHh74U1R9DocucnZCsMnoo6lYZD'; // Reemplazar con tu token de acceso de Meta
 
 // Endpoint para manejar la verificación del webhook
 app.get('/webhook', (req, res) => {
@@ -44,6 +45,44 @@ app.post('/webhook', async (req, res) => {
         res.status(200).send('EVENT_RECEIVED');
     } else {
         res.status(404).send('No encontrado');
+    }
+});
+
+// Endpoint para recibir la respuesta de Make y enviar el mensaje a través de la API de WhatsApp
+app.post('/send-message', async (req, res) => {
+    const { to, response } = req.body;
+
+    if (!to || !response) {
+        return res.status(400).send('Datos incompletos');
+    }
+
+    try {
+        // Construir el JSON para enviar el mensaje
+        const data = {
+            messaging_product: 'whatsapp',
+            to: to,
+            type: 'text',
+            text: {
+                body: response
+            }
+        };
+
+        // URL de la API de WhatsApp
+        const url = `https://graph.facebook.com/v21.0/559822483873940/messages`; // Reemplaza <PHONE_NUMBER_ID> con tu número de teléfono ID
+
+        // Enviar el mensaje a través de la API de WhatsApp
+        const whatsappResponse = await axios.post(url, data, {
+            headers: {
+                'Authorization': `Bearer ${ACCESS_TOKEN}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        console.log('Mensaje enviado a WhatsApp:', whatsappResponse.data);
+        res.status(200).send('Mensaje enviado');
+    } catch (error) {
+        console.error('Error al enviar mensaje a WhatsApp:', error.response ? error.response.data : error.message);
+        res.status(500).send('Error al enviar mensaje');
     }
 });
 
