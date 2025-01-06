@@ -4,11 +4,13 @@ const bodyParser = require('body-parser');
 const app = express();
 app.use(bodyParser.json());
 
-// Token de verificación (debe coincidir con el configurado en WhatsApp)
-const VERIFY_TOKEN = 'mi_token_secreto';
 
 // Endpoint para la verificación del webhook
 app.get('/webhook', (req, res) => {
+
+    // Token de verificación (debe coincidir con el configurado en WhatsApp)
+const VERIFY_TOKEN = 'mi_token_secreto';
+
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
