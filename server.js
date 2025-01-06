@@ -7,7 +7,7 @@ app.use(bodyParser.json());
 
 // Token de verificación
 const VERIFY_TOKEN = 'mi_token_secreto';
-const ACCESS_TOKEN = 'EAAG8R2yWJOwBO8elKtdEZCMOZA5VNiSZAfgybZBNaWXP9mDPtGWI7HrBphT7qoUute9CxNAmwWTksfjj85wyIWNhB0rsCAdHmEMLu8SV7h33XBI5baMNoUxJ1NV2IYSqGcpNLdjd4pYQIgLJQRSB5ZCZAYf49bQFMOBXx3sdYN2iUfztXZBkQawN44ZBR3dmxRyVnDeVHh74U1R9DocucnZCsMnoo6lYZD'; // Reemplazar con tu token de acceso de Meta
+const ACCESS_TOKEN = 'EAAG8R2yWJOwBO3GpiXFoemE3R28SHLFlTHrZCY08dRbp4DyGNfUXEzFZAzPd5KrvIgO4mV0lFtjDLfCAZCdx9RgZBz2p82RqPZB1TZCap5DFjFSOdnmBphZBoNBWngVhEQRVLKZCunFsYook79E6ROjWEBzyAFtBSxZC6aBUICprp27gtHissBiWZAGf6Uc3ZCMMusn'; // Reemplazar con tu token de acceso de Meta
 
 // Endpoint para manejar la verificación del webhook
 app.get('/webhook', (req, res) => {
