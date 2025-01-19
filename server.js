@@ -86,6 +86,35 @@ app.post('/send-message', async (req, res) => {
     }
 });
 
+app.post('/appointments', (req, res) => {
+    const { phone_number, name, email, city, description, preferred_date, preferred_time, mode } = req.body;
+
+    // Validar los datos recibidos
+    if (!phone_number || !name || !city || !description || !preferred_date || !preferred_time) {
+        return res.status(400).send('Todos los campos obligatorios deben completarse');
+    }
+
+    // Verificar que la modalidad sea válida si la ciudad es Barranquilla o Melbourne
+    const validCities = ['Barranquilla', 'Melbourne'];
+    if (validCities.includes(city) && !['Presencial', 'Virtual'].includes(mode)) {
+        return res.status(400).send('Debe especificar si la cita será Presencial o Virtual para esta ciudad');
+    }
+
+    // Insertar la cita en la tabla appointments
+    const sql = `
+        INSERT INTO appointments 
+        (phone_number, name, email, city, description, preferred_date, preferred_time, mode) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+    db.query(sql, [phone_number, name, email, city, description, preferred_date, preferred_time, mode], (err, result) => {
+        if (err) {
+            console.error('Error al guardar la cita:', err.message);
+            return res.status(500).send('Error al guardar la cita');
+        }
+        res.status(201).send({ message: 'Cita creada con éxito', id: result.insertId });
+    });
+});
+
 // Inicia el servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Servidor corriendo en el puerto ${PORT}`));
