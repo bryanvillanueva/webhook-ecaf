@@ -1,9 +1,11 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios'); // Para enviar solicitudes
+const cors = require('cors'); // Para habilitar CORS
 
 const app = express();
 app.use(bodyParser.json());
+app.use(cors());
 
 // Token de verificación
 const VERIFY_TOKEN = 'mi_token_secreto';
