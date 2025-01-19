@@ -2,10 +2,27 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios'); // Para enviar solicitudes
 const cors = require('cors'); // Para habilitar CORS
+const mysql = require('mysql2'); // Para conectarse a la base de datos
 
 const app = express();
 app.use(bodyParser.json());
 app.use(cors());
+
+const db = mysql.createPool({
+    host: process.env.DB_HOST,      // Usar variables de entorno
+    user: process.env.DB_USER,
+    password: process.env.DB_PASS,
+    database: process.env.DB_NAME,
+});
+
+// Verifica la conexión
+db.getConnection((err) => {
+    if (err) {
+        console.error('Error al conectar a la base de datos:', err.message);
+    } else {
+        console.log('Conectado a la base de datos MySQL');
+    }
+});
 
 // Token de verificación
 const VERIFY_TOKEN = 'mi_token_secreto';
