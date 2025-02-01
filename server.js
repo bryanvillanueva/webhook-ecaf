@@ -44,6 +44,7 @@ app.get('/webhook', (req, res) => {
 
 // Endpoint para recibir mensajes entrantes de WhatsApp
 app.post('/webhook', async (req, res) => {
+    console.log('Mensaje recibido en Webhook:', JSON.stringify(req.body, null, 2));
     const body = req.body;
 
     if (body.object) {
@@ -136,4 +137,4 @@ app.post('/appointments', (req, res) => {
 
 // Inicia el servidor
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor corriendo en el puerto ${PORT}`));
+app.listen(PORT, "0.0.0.0", () => console.log(`Servidor corriendo en el puerto ${PORT}`));
