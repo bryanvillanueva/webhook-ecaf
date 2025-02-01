@@ -135,6 +135,16 @@ app.post('/appointments', (req, res) => {
     });
 });
 
+
+process.on("SIGTERM", () => {
+    console.log("Señal SIGTERM recibida. Cerrando servidor...");
+    server.close(() => {
+        console.log("Servidor cerrado correctamente.");
+        process.exit(0);
+    });
+});
+
+
 // Inicia el servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => console.log(`Servidor corriendo en el puerto ${PORT}`));
