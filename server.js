@@ -38,7 +38,7 @@ app.get('/webhook', (req, res) => {
         // Responde con el hub.challenge
         res.status(200).send(challenge);
     } else {
-        res.status(403).send('Token inválido');
+        res.status(403).send('Token inválido!');
     }
 });
 
