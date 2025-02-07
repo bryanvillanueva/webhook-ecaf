@@ -26,7 +26,7 @@ db.getConnection((err) => {
 
 // Token de verificación
 const VERIFY_TOKEN = 'Mi_Nuevo_Token_Secreto';
-const ACCESS_TOKEN = 'EAAG8R2yWJOwBO3GpiXFoemE3R28SHLFlTHrZCY08dRbp4DyGNfUXEzFZAzPd5KrvIgO4mV0lFtjDLfCAZCdx9RgZBz2p82RqPZB1TZCap5DFjFSOdnmBphZBoNBWngVhEQRVLKZCunFsYook79E6ROjWEBzyAFtBSxZC6aBUICprp27gtHissBiWZAGf6Uc3ZCMMusn'; // Reemplazar con tu token de acceso de Meta
+const ACCESS_TOKEN = 'EAAG8R2yWJOwBO9ZBFWH5HQzmsmJxLS8hpX1kt05P42HYr2pdfIINTpJAOCWeoSYlat26qCYZBnAMADObZCZBSOxBPI1Aa55Cmn8GfHfWRPVFIBL7U8O4lAfYyDvINtxPUwiTo7Q6ceUqp8oPW2BMvlC98w2QZCpX1GmGj1X6Wpm6cdjIulA3HsedytsVKcpTB8wZDZD'; // Reemplazar con tu token de acceso de Meta
 
 // Endpoint para manejar la verificación del webhook
 app.get('/webhook', (req, res) => {
