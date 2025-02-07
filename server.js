@@ -25,7 +25,7 @@ db.getConnection((err) => {
 });
 
 // Token de verificación
-const VERIFY_TOKEN = 'mi_token_secreto';
+const VERIFY_TOKEN = 'Mi_Nuevo_Token_Secreto';
 const ACCESS_TOKEN = 'EAAG8R2yWJOwBO3GpiXFoemE3R28SHLFlTHrZCY08dRbp4DyGNfUXEzFZAzPd5KrvIgO4mV0lFtjDLfCAZCdx9RgZBz2p82RqPZB1TZCap5DFjFSOdnmBphZBoNBWngVhEQRVLKZCunFsYook79E6ROjWEBzyAFtBSxZC6aBUICprp27gtHissBiWZAGf6Uc3ZCMMusn'; // Reemplazar con tu token de acceso de Meta
 
 // Endpoint para manejar la verificación del webhook
@@ -104,35 +104,6 @@ app.post('/send-message', async (req, res) => {
         console.error('Error al enviar mensaje a WhatsApp:', error.response ? error.response.data : error.message);
         res.status(500).send('Error al enviar mensaje');
     }
-});
-
-app.post('/appointments', (req, res) => {
-    const { phone_number, name, email, city, description, preferred_date, preferred_time, mode } = req.body;
-
-    // Validar los datos recibidos
-    if (!phone_number || !name || !city || !description || !preferred_date || !preferred_time) {
-        return res.status(400).send('Todos los campos obligatorios deben completarse');
-    }
-
-    // Verificar que la modalidad sea válida si la ciudad es Barranquilla o Melbourne
-    const validCities = ['Barranquilla', 'Melbourne'];
-    if (validCities.includes(city) && !['Presencial', 'Virtual'].includes(mode)) {
-        return res.status(400).send('Debe especificar si la cita será Presencial o Virtual para esta ciudad');
-    }
-
-    // Insertar la cita en la tabla appointments
-    const sql = `
-        INSERT INTO appointments 
-        (phone_number, name, email, city, description, preferred_date, preferred_time, mode) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-    db.query(sql, [phone_number, name, email, city, description, preferred_date, preferred_time, mode], (err, result) => {
-        if (err) {
-            console.error('Error al guardar la cita:', err.message);
-            return res.status(500).send('Error al guardar la cita');
-        }
-        res.status(201).send({ message: 'Cita creada con éxito', id: result.insertId });
-    });
 });
 
 
