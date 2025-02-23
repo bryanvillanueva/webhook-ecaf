@@ -130,10 +130,10 @@ app.get('/api/messages/:conversationId', (req, res) => {
     const { conversationId } = req.params;
 
     const sql = `
-        SELECT id AS message_id, sender, text, created_at
+        SELECT id AS message_id, sender, message, sent_at
         FROM messages
         WHERE conversation_id = ?
-        ORDER BY created_at ASC;
+        ORDER BY sent_at ASC;
     `;
 
     db.query(sql, [conversationId], (err, results) => {
