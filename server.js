@@ -105,7 +105,7 @@ app.get('/api/conversations', (req, res) => {
     const sql = `
         SELECT c.id AS conversation_id, c.client_id, cl.name AS client_name, c.status,
                (SELECT message FROM messages WHERE conversation_id = c.id ORDER BY sent_at DESC LIMIT 1) AS last_message,
-               c.updated_at
+               c.last_message_at
         FROM conversations c
         JOIN clients cl ON c.client_id = cl.id
         ORDER BY c.updated_at DESC;
