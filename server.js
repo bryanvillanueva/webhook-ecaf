@@ -103,6 +103,56 @@ app.post('/send-message', async (req, res) => {
     }
 });
 
+// End point para enviar mensajes desde el frontend a WhatsApp
+
+app.post('/send-manual-message', async (req, res) => {
+    // Expecting: to (recipient phone), conversationId, message (text), and optionally sender
+    const { to, conversationId, message, sender } = req.body;
+  
+    if (!to || !conversationId || !message) {
+      return res.status(400).send('Missing required fields: to, conversationId, and message are required.');
+    }
+  
+    try {
+      // Build the payload to send via WhatsApp API
+      const data = {
+        messaging_product: 'whatsapp',
+        to: to,
+        type: 'text',
+        text: { body: message }
+      };
+  
+      const url = `https://graph.facebook.com/v21.0/559822483873940/messages`;
+  
+      // Send the message via the WhatsApp API
+      const whatsappResponse = await axios.post(url, data, {
+        headers: {
+          'Authorization': `Bearer ${ACCESS_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      });
+  
+      console.log('✅ Manual message sent to WhatsApp:', whatsappResponse.data);
+  
+      // After successful sending, insert the message into the database
+      const sql = `
+        INSERT INTO messages (conversation_id, sender, message, sent_at)
+        VALUES (?, ?, ?, NOW())
+      `;
+      // Use "Sharky" as default sender if not provided
+      db.query(sql, [conversationId, sender || 'Sharky', message], (err, result) => {
+        if (err) {
+          console.error('❌ Error storing message in DB:', err.message);
+          return res.status(500).json({ error: 'Error storing message in DB' });
+        }
+        res.status(200).json({ message: 'Message sent and stored successfully', insertId: result.insertId });
+      });
+    } catch (error) {
+      console.error('❌ Error sending manual message:', error.response ? error.response.data : error.message);
+      res.status(500).send('Error sending manual message');
+    }
+  });
+
 // 📌 Endpoint para obtener todas las conversaciones con el último mensaje
 app.get('/api/conversations', (req, res) => {
     const sql = `
