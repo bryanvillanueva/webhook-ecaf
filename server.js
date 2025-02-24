@@ -7,6 +7,8 @@ const mysql = require('mysql2'); // Para conectarse a la base de datos
 const app = express();
 app.use(bodyParser.json());
 app.use(cors());
+app.use(express.json({ extended: true }));
+app.use(express.urlencoded({ extended: true }));
 
 const db = mysql.createPool({
     host: 'srv1041.hstgr.io',
@@ -15,7 +17,8 @@ const db = mysql.createPool({
     database: 'u255066530_ChatBoot',
     waitForConnections: true,
     connectionLimit: 10,
-    queueLimit: 0
+    queueLimit: 0,
+    charset: 'utf8mb4'
 });
 
 // Verifica la conexión
