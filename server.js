@@ -48,44 +48,29 @@ app.get('/webhook', (req, res) => {
     }
 });
 
-// 📌 Endpoint para recibir mensajes de WhatsApp y enviarlos a Make
+// 📌 Endpoint para recibir mensajes de WhatsApp y enviarlos a Make (text or audio)
 app.post('/webhook', async (req, res) => {
     console.log('Mensaje recibido en Webhook:', JSON.stringify(req.body, null, 2));
     const body = req.body;
 
     if (body.object) {
-        // Example: Assume messages are located in body.entry[0].changes[0].value.messages
+        // Assume messages are in: body.entry[0].changes[0].value.messages
         const messagesArray = body.entry?.[0]?.changes?.[0]?.value?.messages;
-        if (messagesArray && messagesArray.length > 0) {
-            // Loop through messages and handle audio messages
-            for (let msg of messagesArray) {
-                if (msg.type === 'audio') {
-                    // The message contains an audio; it usually provides an ID in msg.audio.id
-                    const mediaId = msg.audio?.id;
-                    if (mediaId) {
-                        try {
-                            // Fetch the media URL from WhatsApp Graph API
-                            const mediaResponse = await axios.get(`https://graph.facebook.com/v21.0/${mediaId}`, {
-                                params: { access_token: ACCESS_TOKEN }
-                            });
-                            // Assume the URL is returned in mediaResponse.data.url
-                            msg.audio_url = mediaResponse.data.url;
-                            console.log('✅ Audio URL fetched:', msg.audio_url);
-                        } catch (error) {
-                            console.error('❌ Error fetching audio URL:', error.message);
-                        }
-                    }
-                }
-            }
+
+        // Check if any message is of type 'audio'
+        let isAudio = false;
+        if (Array.isArray(messagesArray)) {
+            isAudio = messagesArray.some(msg => msg.type === 'audio');
         }
-        
-        // Forward the (modified) payload to Make
+
+        // Choose target webhook URL based on message type
+        const targetWebhook = isAudio 
+            ? 'https://hook.eu2.make.com/pch3avcjrya2et6gqol5vdoyh11txfrl' 
+            : 'https://hook.eu2.make.com/ve2tavn6hjsvscq1t3q5y6jc0m47ee68';
+
         try {
-            const makeResponse = await axios.post(
-                'https://hook.eu2.make.com/ve2tavn6hjsvscq1t3q5y6jc0m47ee68',
-                body
-            );
-            console.log('✅ Mensaje enviado a Make:', makeResponse.status);
+            const makeResponse = await axios.post(targetWebhook, body);
+            console.log('✅ Mensaje enviado a Make:', makeResponse.status, 'Webhook:', targetWebhook);
         } catch (error) {
             console.error('❌ Error al enviar mensaje a Make:', error.message);
         }
