@@ -403,6 +403,68 @@ app.get('/api/download-media', async (req, res) => {
       res.status(500).json({ error: 'Error fetching media' });
     }
   });
+
+
+
+  // DASHBOARD //
+// Endpoint para obtener información del dashboard
+app.get('/api/dashboard-info', (req, res) => {
+    const queryTotalMessages = 'SELECT COUNT(*) AS total_mensajes FROM messages';
+    const queryMessagesSharky = 'SELECT COUNT(*) AS mensajes_sharky FROM messages WHERE sender = "Sharky"';
+    const queryTotalUsers = 'SELECT COUNT(DISTINCT client_id) AS total_usuarios FROM conversations';
+    const queryTimeline = `
+      SELECT DATE(sent_at) AS date, COUNT(*) AS count 
+      FROM messages 
+      WHERE sender != 'Sharky' 
+        AND MONTH(sent_at) = MONTH(CURRENT_DATE()) 
+        AND YEAR(sent_at) = YEAR(CURRENT_DATE())
+      GROUP BY DATE(sent_at)
+      ORDER BY date ASC
+    `;
+  
+    // Ejecutamos el primer query: total de mensajes
+    db.query(queryTotalMessages, (err, totalMessagesResult) => {
+      if (err) {
+        console.error('❌ Error al obtener total de mensajes:', err.message);
+        return res.status(500).json({ error: 'Error al obtener total de mensajes' });
+      }
+      const total_mensajes = totalMessagesResult[0].total_mensajes;
+  
+      // Ejecutamos el query para obtener mensajes enviados por "Sharky"
+      db.query(queryMessagesSharky, (err, messagesSharkyResult) => {
+        if (err) {
+          console.error('❌ Error al obtener mensajes de Sharky:', err.message);
+          return res.status(500).json({ error: 'Error al obtener mensajes de Sharky' });
+        }
+        const mensajes_sharky = messagesSharkyResult[0].mensajes_sharky;
+  
+        // Ejecutamos el query para obtener total de usuarios (clientes distintos)
+        db.query(queryTotalUsers, (err, totalUsersResult) => {
+          if (err) {
+            console.error('❌ Error al obtener total de usuarios:', err.message);
+            return res.status(500).json({ error: 'Error al obtener total de usuarios' });
+          }
+          const total_usuarios = totalUsersResult[0].total_usuarios;
+  
+          // Ejecutamos el query para obtener el timeline de mensajes recibidos en este mes
+          db.query(queryTimeline, (err, timelineResult) => {
+            if (err) {
+              console.error('❌ Error al obtener timeline de mensajes:', err.message);
+              return res.status(500).json({ error: 'Error al obtener timeline de mensajes' });
+            }
+            res.json({
+              total_mensajes,
+              mensajes_sharky,
+              total_usuarios,
+              timeline: timelineResult
+            });
+          });
+        });
+      });
+    });
+  });
+
+  // END DASHBOARD //
   
 // 📌 Endpoint para agendar citas en la base de datos
 app.post('/appointments', (req, res) => {
