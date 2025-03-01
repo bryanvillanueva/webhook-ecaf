@@ -175,11 +175,11 @@ SELECT
     c.status,
     c.autoresponse,
     (SELECT message FROM messages WHERE conversation_id = c.id ORDER BY sent_at DESC LIMIT 1) AS last_message,
+    (SELECT message_type FROM messages WHERE conversation_id = c.id ORDER BY sent_at DESC LIMIT 1) AS last_message_type,
     c.last_message_at
 FROM conversations c
 JOIN clients cl ON c.client_id = cl.id
 ORDER BY c.last_message_at DESC;
-
     `;
 
     db.query(sql, (err, results) => {
@@ -190,6 +190,7 @@ ORDER BY c.last_message_at DESC;
         res.json(results);
     });
 });
+
 
 app.get('/api/messages/:conversationId', (req, res) => {
     const { conversationId } = req.params;
