@@ -262,6 +262,21 @@ app.put('/api/conversations/:conversationId/autoresponse', (req, res) => {
   });
 
 
+  // 📌 Endpoint para obtener la URL del audio a partir de su mediaId
+app.get('/api/media-url/:mediaId', async (req, res) => {
+    const { mediaId } = req.params;
+    try {
+      const response = await axios.get(`https://graph.facebook.com/v13.0/${mediaId}`, {
+        params: { access_token: ACCESS_TOKEN }
+      });
+      // Suponiendo que la respuesta incluya la URL en response.data.url
+      res.json({ url: response.data.url });
+    } catch (error) {
+      console.error('❌ Error fetching media URL:', error.message);
+      res.status(500).json({ error: 'Error fetching media URL' });
+    }
+  });
+
 
   
 // 📌 Endpoint para agendar citas en la base de datos
