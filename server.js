@@ -196,12 +196,15 @@ app.get('/api/messages/:conversationId', (req, res) => {
     const { conversationId } = req.params;
 
     const sql = `
-        SELECT id AS message_id, sender, 
-               CASE 
-                 WHEN message_type = 'audio' THEN media_url 
-                 ELSE message 
-               END AS message,
-               sent_at
+        SELECT 
+            id AS message_id, 
+            sender, 
+            message_type,
+            CASE 
+              WHEN message_type = 'audio' THEN media_url 
+              ELSE message 
+            END AS message,
+            sent_at
         FROM messages
         WHERE conversation_id = ?
         ORDER BY sent_at ASC;
@@ -215,6 +218,7 @@ app.get('/api/messages/:conversationId', (req, res) => {
         res.json(results);
     });
 });
+
 
 
 
