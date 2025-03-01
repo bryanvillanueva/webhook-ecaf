@@ -198,6 +198,28 @@ app.get('/api/messages/:conversationId', (req, res) => {
     });
 });
 
+
+// 📌 Endpoint to update the autoresponse value for a conversation
+app.put('/api/conversations/:conversationId/autoresponse', (req, res) => {
+    const { conversationId } = req.params;
+    const { autoresponse } = req.body;
+  
+    // Validate that the autoresponse field is provided
+    if (typeof autoresponse === 'undefined') {
+      return res.status(400).json({ error: 'Missing autoresponse field in request body' });
+    }
+  
+    const sql = 'UPDATE conversations SET autoresponse = ? WHERE id = ?';
+    db.query(sql, [autoresponse, conversationId], (err, result) => {
+      if (err) {
+        console.error('❌ Error updating autoresponse:', err.message);
+        return res.status(500).json({ error: 'Error updating autoresponse' });
+      }
+      res.status(200).json({ message: 'Autoresponse updated successfully' });
+    });
+  });
+
+  
 // 📌 Endpoint para agendar citas en la base de datos
 app.post('/appointments', (req, res) => {
     const { phone_number, name, email, city, description, preferred_date, preferred_time, mode } = req.body;
