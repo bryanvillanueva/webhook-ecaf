@@ -286,22 +286,41 @@ async function updateMediaUrlInDatabase(mediaId, newUrl) {
     }
   }
   
-  // Endpoint para obtener la URL del audio a partir de su mediaId
-  app.get('/api/media-url/:mediaId', async (req, res) => {
+ // Endpoint para obtener la URL del audio a partir de su mediaId (primera vez)
+app.get('/api/media-url/:mediaId', async (req, res) => {
     const { mediaId } = req.params;
     try {
       const response = await axios.get(`https://graph.facebook.com/v13.0/${mediaId}`, {
         params: { access_token: ACCESS_TOKEN }
       });
-      // Guardar la nueva URL en la base de datos
-      await updateMediaUrlInDatabase(mediaId, response.data.url);
+      // Simplemente devolvemos la URL, asumiendo que Make se encarga de guardarla
       res.json({ url: response.data.url });
     } catch (error) {
       console.error('❌ Error fetching media URL:', error.message);
       res.status(500).json({ error: 'Error fetching media URL' });
     }
   });
-  
+
+  // Endpoint para renovar una URL expirada
+app.get('/api/renew-media-url/:mediaId', async (req, res) => {
+    const { mediaId } = req.params;
+    try {
+      const response = await axios.get(`https://graph.facebook.com/v13.0/${mediaId}`, {
+        params: { access_token: ACCESS_TOKEN }
+      });
+      
+      // Actualizar la URL en la base de datos
+      await updateMediaUrlInDatabase(mediaId, response.data.url);
+      
+      res.json({ url: response.data.url });
+    } catch (error) {
+      console.error('❌ Error renovando media URL:', error.message);
+      res.status(500).json({ error: 'Error renovando media URL' });
+    }
+  });
+
+
+
   // Proxy endpoint para descargar la media y enviarla al frontend
 app.get('/api/download-media', async (req, res) => {
     const { url, mediaId } = req.query; // URL del audio y mediaId almacenados en DB
