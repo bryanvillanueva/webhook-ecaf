@@ -288,15 +288,23 @@ app.get('/api/media-url/:mediaId', async (req, res) => {
     }
   });
 
-  // Proxy endpoint para decodificar la URL de la media y enviarla al frontend 
-
-  app.get('/api/download-media', async (req, res) => {
+// Proxy endpoint para descargar la media y enviarla al frontend
+app.get('/api/download-media', async (req, res) => {
     const { url } = req.query; // URL del audio ya almacenada en la DB
+    
     if (!url) {
       return res.status(400).json({ error: 'No se proporcionó la URL' });
     }
+    
     try {
-      const response = await axios.get(url, { responseType: 'arraybuffer' });
+      // Incluir el token de acceso en la cabecera de autorización
+      const response = await axios.get(url, { 
+        responseType: 'arraybuffer',
+        headers: {
+          'Authorization': `Bearer ${ACCESS_TOKEN}`
+        }
+      });
+      
       const contentType = response.headers['content-type'] || 'audio/ogg';
       res.setHeader('Content-Type', contentType);
       res.send(Buffer.from(response.data, 'binary'));
