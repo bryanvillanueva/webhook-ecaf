@@ -179,7 +179,7 @@ SELECT
     c.last_message_at
 FROM conversations c
 JOIN clients cl ON c.client_id = cl.id
-ORDER BY c.last_message_at DESC;
+ORDER BY c.last_message_at ASC;
     `;
 
     db.query(sql, (err, results) => {
