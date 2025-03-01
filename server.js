@@ -219,7 +219,29 @@ app.get('/api/messages/:conversationId', (req, res) => {
     });
 });
 
+// Proxy endpoint para decodificar la URL de la media y enviarla al frontend 
 
+app.get('/api/download-media', async (req, res) => {
+    const { url } = req.query;
+    if (!url) {
+      return res.status(400).json({ error: 'No se proporcionó la URL' });
+    }
+    try {
+      // Realiza una solicitud GET a la media_url con respuesta en formato arraybuffer
+      const response = await axios.get(url, { responseType: 'arraybuffer' });
+      
+      // Establece el Content-Type de acuerdo al encabezado recibido, o usa audio/ogg por defecto
+      const contentType = response.headers['content-type'] || 'audio/ogg';
+      res.setHeader('Content-Type', contentType);
+      
+      // Envía el contenido del audio como Buffer
+      res.send(Buffer.from(response.data, 'binary'));
+    } catch (error) {
+      console.error('❌ Error al obtener el media:', error.message);
+      res.status(500).json({ error: 'Error al obtener el media' });
+    }
+  });
+  
 
 
   // 📌 New Endpoint for fetching details of a single conversation
