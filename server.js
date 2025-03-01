@@ -274,7 +274,7 @@ app.put('/api/conversations/:conversationId/autoresponse', (req, res) => {
  async function updateMediaUrlInDatabase(mediaId, newUrl) {
     try {
       const [result] = await db.promise().execute(
-        'UPDATE messages SET media_url = ?, updated_at = NOW() WHERE media_id = ?',
+        'UPDATE messages SET media_url = ? WHERE media_id = ?',
         [newUrl, mediaId]
       );
       console.log(`✅ URL actualizada para mediaId: ${mediaId}, filas afectadas: ${result.affectedRows}`);
