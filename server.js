@@ -219,23 +219,7 @@ app.get('/api/messages/:conversationId', (req, res) => {
     });
 });
 
-// Proxy endpoint para decodificar la URL de la media y enviarla al frontend 
 
-app.get('/api/download-media', async (req, res) => {
-    const { url } = req.query;
-    if (!url) {
-      return res.status(400).json({ error: 'No se proporcionó la URL' });
-    }
-    try {
-      const response = await axios.get(url, { responseType: 'arraybuffer' });
-      const contentType = response.headers['content-type'] || 'audio/ogg';
-      res.setHeader('Content-Type', contentType);
-      res.send(Buffer.from(response.data, 'binary'));
-    } catch (error) {
-      console.error('❌ Error fetching media:', error.response ? error.response.data : error.message);
-      res.status(500).json({ error: 'Error fetching media' });
-    }
-  });
   
 
 
@@ -304,6 +288,23 @@ app.get('/api/media-url/:mediaId', async (req, res) => {
     }
   });
 
+  // Proxy endpoint para decodificar la URL de la media y enviarla al frontend 
+
+  app.get('/api/download-media', async (req, res) => {
+    const { url } = req.query; // URL del audio ya almacenada en la DB
+    if (!url) {
+      return res.status(400).json({ error: 'No se proporcionó la URL' });
+    }
+    try {
+      const response = await axios.get(url, { responseType: 'arraybuffer' });
+      const contentType = response.headers['content-type'] || 'audio/ogg';
+      res.setHeader('Content-Type', contentType);
+      res.send(Buffer.from(response.data, 'binary'));
+    } catch (error) {
+      console.error('❌ Error fetching media:', error.response ? error.response.data : error.message);
+      res.status(500).json({ error: 'Error fetching media' });
+    }
+  });
 
   
 // 📌 Endpoint para agendar citas en la base de datos
