@@ -2,6 +2,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios'); // Para enviar solicitudes
 const cors = require('cors'); // Para habilitar CORS
+const multer = require('multer');
 const mysql = require('mysql2'); // Para conectarse a la base de datos
 
 const app = express();
@@ -31,9 +32,16 @@ db.getConnection((err, connection) => {
     }
 });
 
+// Configure multer to store the file in memory
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
+
 // Token de verificación
+const PHONE_NUMBER_ID = '559822483873940';
 const VERIFY_TOKEN = 'Mi_Nuevo_Token_Secreto';
 const ACCESS_TOKEN = 'EAAG8R2yWJOwBO9ZBFWH5HQzmsmJxLS8hpX1kt05P42HYr2pdfIINTpJAOCWeoSYlat26qCYZBnAMADObZCZBSOxBPI1Aa55Cmn8GfHfWRPVFIBL7U8O4lAfYyDvINtxPUwiTo7Q6ceUqp8oPW2BMvlC98w2QZCpX1GmGj1X6Wpm6cdjIulA3HsedytsVKcpTB8wZDZD'; // Reemplazar con tu token real
+
+
 
 // 📌 Endpoint para manejar la verificación del webhook
 app.get('/webhook', (req, res) => {
@@ -483,6 +491,71 @@ app.get('/api/dashboard-info', (req, res) => {
   
 
   // END DASHBOARD //
+
+  // Endpoint to send media messages (documents or images) from the frontend
+// Expected fields in the request body:
+// - to: recipient phone number
+// - mediaType: either "image" or "document"
+// - caption: (optional) caption for the media message
+// And a file uploaded with key "file"
+app.post('/api/send-media', upload.single('file'), async (req, res) => {
+    try {
+      const { to, mediaType, caption } = req.body;
+      
+      if (!to || !mediaType || !req.file) {
+        return res.status(400).json({ error: 'Missing required fields: to, mediaType, and file are required.' });
+      }
+      
+      // Create form-data to upload the file to WhatsApp
+      const formData = new FormData();
+      formData.append('messaging_product', 'whatsapp');
+      formData.append('file', req.file.buffer, {
+        filename: req.file.originalname,
+        contentType: req.file.mimetype,
+      });
+      
+      // Upload the media file to WhatsApp
+      const mediaUploadUrl = `https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/media`;
+      const mediaResponse = await axios.post(mediaUploadUrl, formData, {
+        headers: {
+          ...formData.getHeaders(),
+          'Authorization': `Bearer ${ACCESS_TOKEN}`,
+        },
+      });
+      
+      const mediaId = mediaResponse.data.id;
+      console.log('Media uploaded, id:', mediaId);
+      
+      // Prepare the payload for sending the media message.
+      // For images and documents, the payload differs slightly.
+      const messagesUrl = `https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/messages`;
+      let payload = {
+        messaging_product: 'whatsapp',
+        to,
+        type: mediaType,
+      };
+      
+      if (mediaType === 'image') {
+        payload.image = { id: mediaId, caption: caption || '' };
+      } else if (mediaType === 'document') {
+        payload.document = { id: mediaId, caption: caption || '' };
+      } else {
+        return res.status(400).json({ error: 'Unsupported mediaType. Use "image" or "document".' });
+      }
+      
+      // Send the media message using the uploaded media ID
+      const messageResponse = await axios.post(messagesUrl, payload, {
+        headers: {
+          'Authorization': `Bearer ${ACCESS_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      res.status(200).json({ message: 'Media sent successfully', mediaId, whatsappResponse: messageResponse.data });
+    } catch (error) {
+      console.error('Error sending media message:', error.response ? error.response.data : error.message);
+      res.status(500).json({ error: 'Error sending media message' });
+    }
   
 // 📌 Endpoint para agendar citas en la base de datos
 app.post('/appointments', (req, res) => {
