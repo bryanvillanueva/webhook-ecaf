@@ -303,31 +303,48 @@ async function updateMediaUrlInDatabase(mediaId, newUrl) {
   });
   
   // Proxy endpoint para descargar la media y enviarla al frontend
-  app.get('/api/download-media', async (req, res) => {
+app.get('/api/download-media', async (req, res) => {
     const { url, mediaId } = req.query; // URL del audio y mediaId almacenados en DB
     
     if (!url) {
       return res.status(400).json({ error: 'Se requiere URL' });
     }
     
+    // Función para verificar si una respuesta es un archivo de audio válido
+    const isValidAudioResponse = (response) => {
+      const contentType = response.headers['content-type'] || '';
+      // Verificar si el contentType comienza con audio/ o es application/octet-stream
+      return contentType.startsWith('audio/') || contentType === 'application/octet-stream';
+    };
+    
     try {
+      let audioResponse;
+      let needNewUrl = false;
+      
       // Intentar descargar con la URL existente
       try {
-        const response = await axios.get(url, { 
+        audioResponse = await axios.get(url, { 
           responseType: 'arraybuffer',
           headers: {
             'Authorization': `Bearer ${ACCESS_TOKEN}`
           }
         });
         
-        const contentType = response.headers['content-type'] || 'audio/ogg';
-        res.setHeader('Content-Type', contentType);
-        return res.send(Buffer.from(response.data, 'binary'));
+        // Verificar si la respuesta parece ser un archivo de audio válido
+        if (!isValidAudioResponse(audioResponse)) {
+          console.log('🔍 La respuesta no parece ser un archivo de audio válido');
+          needNewUrl = true;
+        }
       } catch (error) {
-        // Si obtenemos un 404, la URL probablemente expiró
-        if (error.response && error.response.status === 404 && mediaId) {
-          console.log('🔄 URL expirada, obteniendo una nueva para mediaId:', mediaId);
-          
+        console.log('🔄 Error con la URL original:', error.message);
+        needNewUrl = true;
+      }
+      
+      // Si necesitamos una nueva URL y tenemos el mediaId
+      if (needNewUrl && mediaId) {
+        console.log('🔄 Obteniendo una nueva URL para mediaId:', mediaId);
+        
+        try {
           // Obtener una nueva URL usando el mediaId
           const mediaResponse = await axios.get(`https://graph.facebook.com/v13.0/${mediaId}`, {
             params: { access_token: ACCESS_TOKEN }
@@ -339,27 +356,33 @@ async function updateMediaUrlInDatabase(mediaId, newUrl) {
           await updateMediaUrlInDatabase(mediaId, newUrl);
           
           // Intentar la descarga con la nueva URL
-          const newResponse = await axios.get(newUrl, { 
+          audioResponse = await axios.get(newUrl, { 
             responseType: 'arraybuffer',
             headers: {
               'Authorization': `Bearer ${ACCESS_TOKEN}`
             }
           });
           
-          const contentType = newResponse.headers['content-type'] || 'audio/ogg';
-          res.setHeader('Content-Type', contentType);
-          return res.send(Buffer.from(newResponse.data, 'binary'));
-        } else {
-          // Si es otro tipo de error, lo propagamos
-          throw error;
+          // Verificar nuevamente si parece un archivo de audio válido
+          if (!isValidAudioResponse(audioResponse)) {
+            throw new Error('La respuesta con la nueva URL tampoco es un archivo de audio válido');
+          }
+        } catch (refreshError) {
+          console.error('❌ Error al obtener o usar la nueva URL:', refreshError.message);
+          return res.status(500).json({ error: 'No se pudo obtener o usar una nueva URL para el archivo de audio' });
         }
       }
+      
+      // Si llegamos aquí, tenemos una respuesta válida
+      const contentType = audioResponse.headers['content-type'] || 'audio/ogg';
+      res.setHeader('Content-Type', contentType);
+      return res.send(Buffer.from(audioResponse.data, 'binary'));
+      
     } catch (error) {
-      console.error('❌ Error fetching media:', error.response ? error.response.data : error.message);
+      console.error('❌ Error fetching media:', error.message);
       res.status(500).json({ error: 'Error fetching media' });
     }
   });
-
   
 // 📌 Endpoint para agendar citas en la base de datos
 app.post('/appointments', (req, res) => {
