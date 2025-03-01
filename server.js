@@ -176,6 +176,7 @@ SELECT
     c.autoresponse,
     (SELECT message FROM messages WHERE conversation_id = c.id ORDER BY sent_at DESC LIMIT 1) AS last_message,
     (SELECT message_type FROM messages WHERE conversation_id = c.id ORDER BY sent_at DESC LIMIT 1) AS last_message_type,
+    (SELECT sender FROM messages WHERE conversation_id = c.id ORDER BY sent_at DESC LIMIT 1) AS last_message_sender,
     c.last_message_at
 FROM conversations c
 JOIN clients cl ON c.client_id = cl.id
