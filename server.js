@@ -54,6 +54,32 @@ app.post('/webhook', async (req, res) => {
     const body = req.body;
 
     if (body.object) {
+        // Example: Assume messages are located in body.entry[0].changes[0].value.messages
+        const messagesArray = body.entry?.[0]?.changes?.[0]?.value?.messages;
+        if (messagesArray && messagesArray.length > 0) {
+            // Loop through messages and handle audio messages
+            for (let msg of messagesArray) {
+                if (msg.type === 'audio') {
+                    // The message contains an audio; it usually provides an ID in msg.audio.id
+                    const mediaId = msg.audio?.id;
+                    if (mediaId) {
+                        try {
+                            // Fetch the media URL from WhatsApp Graph API
+                            const mediaResponse = await axios.get(`https://graph.facebook.com/v21.0/${mediaId}`, {
+                                params: { access_token: ACCESS_TOKEN }
+                            });
+                            // Assume the URL is returned in mediaResponse.data.url
+                            msg.audio_url = mediaResponse.data.url;
+                            console.log('✅ Audio URL fetched:', msg.audio_url);
+                        } catch (error) {
+                            console.error('❌ Error fetching audio URL:', error.message);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Forward the (modified) payload to Make
         try {
             const makeResponse = await axios.post(
                 'https://hook.eu2.make.com/ve2tavn6hjsvscq1t3q5y6jc0m47ee68',
@@ -69,6 +95,7 @@ app.post('/webhook', async (req, res) => {
         res.status(404).send('No encontrado');
     }
 });
+
 
 // 📌 Endpoint para enviar mensajes de respuesta a WhatsApp
 app.post('/send-message', async (req, res) => {
