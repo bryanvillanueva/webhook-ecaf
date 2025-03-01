@@ -556,6 +556,7 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
       console.error('Error sending media message:', error.response ? error.response.data : error.message);
       res.status(500).json({ error: 'Error sending media message' });
     }
+});
   
 // 📌 Endpoint para agendar citas en la base de datos
 app.post('/appointments', (req, res) => {
