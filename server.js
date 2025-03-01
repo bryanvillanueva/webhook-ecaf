@@ -219,6 +219,36 @@ app.put('/api/conversations/:conversationId/autoresponse', (req, res) => {
     });
   });
 
+// Endpoint para obtener el valor de autorespuesta de una conversación específica
+
+  app.get('/api/conversations/:conversationId', (req, res) => {
+    const { conversationId } = req.params;
+    const sql = `
+      SELECT 
+        c.id AS conversation_id, 
+        c.client_id, 
+        cl.name AS client_name, 
+        c.status,
+        c.autoresponse,
+        (SELECT message FROM messages WHERE conversation_id = c.id ORDER BY sent_at DESC LIMIT 1) AS last_message,
+        c.last_message_at
+      FROM conversations c
+      JOIN clients cl ON c.client_id = cl.id
+      WHERE c.id = ?
+    `;
+    db.query(sql, [conversationId], (err, results) => {
+      if (err) {
+        console.error('❌ Error al obtener la conversación:', err.message);
+        return res.status(500).json({ error: 'Error al obtener la conversación' });
+      }
+      if (results.length === 0) {
+        return res.status(404).json({ error: 'Conversación no encontrada' });
+      }
+      res.json(results[0]);
+    });
+  });
+  
+
   
 // 📌 Endpoint para agendar citas en la base de datos
 app.post('/appointments', (req, res) => {
