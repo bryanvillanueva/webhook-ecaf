@@ -191,7 +191,6 @@ ORDER BY c.last_message_at DESC;
     });
 });
 
-// 📌 Endpoint para obtener los mensajes de una conversación específica
 app.get('/api/messages/:conversationId', (req, res) => {
     const { conversationId } = req.params;
 
@@ -200,6 +199,7 @@ app.get('/api/messages/:conversationId', (req, res) => {
             id AS message_id, 
             sender, 
             message_type,
+            media_id,
             CASE 
               WHEN message_type = 'audio' THEN media_url 
               ELSE message 
@@ -218,9 +218,6 @@ app.get('/api/messages/:conversationId', (req, res) => {
         res.json(results);
     });
 });
-
-
-  
 
 
   // 📌 New Endpoint for fetching details of a single conversation
@@ -273,41 +270,90 @@ app.put('/api/conversations/:conversationId/autoresponse', (req, res) => {
   });
 
 
-  // 📌 Endpoint para obtener la URL del audio a partir de su mediaId
-app.get('/api/media-url/:mediaId', async (req, res) => {
+ // Función para actualizar la URL en la base de datos
+async function updateMediaUrlInDatabase(mediaId, newUrl) {
+    try {
+      const [result] = await pool.execute(
+        'UPDATE messages SET media_url = ?, updated_at = NOW() WHERE media_id = ?',
+        [newUrl, mediaId]
+      );
+      
+      console.log(`✅ URL actualizada para mediaId: ${mediaId}, filas afectadas: ${result.affectedRows}`);
+      return result.affectedRows > 0;
+    } catch (error) {
+      console.error('❌ Error al actualizar la URL en la base de datos:', error.message);
+      throw error;
+    }
+  }
+  
+  // Endpoint para obtener la URL del audio a partir de su mediaId
+  app.get('/api/media-url/:mediaId', async (req, res) => {
     const { mediaId } = req.params;
     try {
       const response = await axios.get(`https://graph.facebook.com/v13.0/${mediaId}`, {
         params: { access_token: ACCESS_TOKEN }
       });
-      // Suponiendo que la respuesta incluya la URL en response.data.url
+      // Guardar la nueva URL en la base de datos
+      await updateMediaUrlInDatabase(mediaId, response.data.url);
       res.json({ url: response.data.url });
     } catch (error) {
       console.error('❌ Error fetching media URL:', error.message);
       res.status(500).json({ error: 'Error fetching media URL' });
     }
   });
-
-// Proxy endpoint para descargar la media y enviarla al frontend
-app.get('/api/download-media', async (req, res) => {
-    const { url } = req.query; // URL del audio ya almacenada en la DB
+  
+  // Proxy endpoint para descargar la media y enviarla al frontend
+  app.get('/api/download-media', async (req, res) => {
+    const { url, mediaId } = req.query; // URL del audio y mediaId almacenados en DB
     
     if (!url) {
-      return res.status(400).json({ error: 'No se proporcionó la URL' });
+      return res.status(400).json({ error: 'Se requiere URL' });
     }
     
     try {
-      // Incluir el token de acceso en la cabecera de autorización
-      const response = await axios.get(url, { 
-        responseType: 'arraybuffer',
-        headers: {
-          'Authorization': `Bearer ${ACCESS_TOKEN}`
+      // Intentar descargar con la URL existente
+      try {
+        const response = await axios.get(url, { 
+          responseType: 'arraybuffer',
+          headers: {
+            'Authorization': `Bearer ${ACCESS_TOKEN}`
+          }
+        });
+        
+        const contentType = response.headers['content-type'] || 'audio/ogg';
+        res.setHeader('Content-Type', contentType);
+        return res.send(Buffer.from(response.data, 'binary'));
+      } catch (error) {
+        // Si obtenemos un 404, la URL probablemente expiró
+        if (error.response && error.response.status === 404 && mediaId) {
+          console.log('🔄 URL expirada, obteniendo una nueva para mediaId:', mediaId);
+          
+          // Obtener una nueva URL usando el mediaId
+          const mediaResponse = await axios.get(`https://graph.facebook.com/v13.0/${mediaId}`, {
+            params: { access_token: ACCESS_TOKEN }
+          });
+          
+          const newUrl = mediaResponse.data.url;
+          
+          // Actualizar la URL en la base de datos
+          await updateMediaUrlInDatabase(mediaId, newUrl);
+          
+          // Intentar la descarga con la nueva URL
+          const newResponse = await axios.get(newUrl, { 
+            responseType: 'arraybuffer',
+            headers: {
+              'Authorization': `Bearer ${ACCESS_TOKEN}`
+            }
+          });
+          
+          const contentType = newResponse.headers['content-type'] || 'audio/ogg';
+          res.setHeader('Content-Type', contentType);
+          return res.send(Buffer.from(newResponse.data, 'binary'));
+        } else {
+          // Si es otro tipo de error, lo propagamos
+          throw error;
         }
-      });
-      
-      const contentType = response.headers['content-type'] || 'audio/ogg';
-      res.setHeader('Content-Type', contentType);
-      res.send(Buffer.from(response.data, 'binary'));
+      }
     } catch (error) {
       console.error('❌ Error fetching media:', error.response ? error.response.data : error.message);
       res.status(500).json({ error: 'Error fetching media' });
