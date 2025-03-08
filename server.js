@@ -44,6 +44,9 @@ cloudinary.config({
   api_secret: process.env.API_SECRET
 });
 
+const upload = multer({ storage }); // Esto es necesario
+
+
 // Configure multer to store the file in memory
 
 const storage = new CloudinaryStorage({
