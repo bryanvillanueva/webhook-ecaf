@@ -4,6 +4,8 @@ const axios = require('axios'); // Para enviar solicitudes
 const cors = require('cors'); // Para habilitar CORS
 const multer = require('multer');
 const mysql = require('mysql2'); // Para conectarse a la base de datos
+const FormData = require('form-data'); // Add this import at the top of your file
+
 
 const app = express();
 app.use(bodyParser.json());
@@ -41,7 +43,7 @@ const PHONE_NUMBER_ID = '559822483873940';
 const VERIFY_TOKEN = 'Mi_Nuevo_Token_Secreto';
 const ACCESS_TOKEN = 'EAAG8R2yWJOwBO9ZBFWH5HQzmsmJxLS8hpX1kt05P42HYr2pdfIINTpJAOCWeoSYlat26qCYZBnAMADObZCZBSOxBPI1Aa55Cmn8GfHfWRPVFIBL7U8O4lAfYyDvINtxPUwiTo7Q6ceUqp8oPW2BMvlC98w2QZCpX1GmGj1X6Wpm6cdjIulA3HsedytsVKcpTB8wZDZD'; // Reemplazar con tu token real
 
-
+const fs = require('fs');
 
 // 📌 Endpoint para manejar la verificación del webhook
 app.get('/webhook', (req, res) => {
@@ -506,19 +508,19 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields: to, mediaType, and file are required.' });
     }
     
-    // Create form-data to upload the file to WhatsApp
+    // Create form-data using the form-data package
     const form = new FormData();
     form.append('messaging_product', 'whatsapp');
-    
-    // Create a proper Blob from the buffer
-    const fileBlob = new Blob([req.file.buffer], { type: req.file.mimetype });
-    form.append('file', fileBlob, req.file.originalname);
+    form.append('file', req.file.buffer, {
+      filename: req.file.originalname,
+      contentType: req.file.mimetype,
+    });
     
     // Upload the media file to WhatsApp
     const mediaUploadUrl = `https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/media`;
     const mediaResponse = await axios.post(mediaUploadUrl, form, {
       headers: {
-        ...form.getHeaders(),
+        ...form.getHeaders(), // This will work with the form-data package
         'Authorization': `Bearer ${ACCESS_TOKEN}`,
       },
     });
@@ -552,6 +554,32 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
       },
     });
     
+    // Store message in your database
+    const now = new Date();
+    const messageData = {
+      message_id: messageResponse.data.messages[0].id,
+      conversation_id: conversationId,
+      sender: 'Sharky',
+      message: caption || '',
+      message_type: mediaType,
+      media_id: mediaId,
+      media_url: `${mediaId}`, // Your download URL logic
+      sent_at: now.toISOString()
+    };
+    
+    // Save to your database logic here
+    
+    res.status(200).json({ 
+      message: 'Media sent successfully', 
+      mediaId, 
+      whatsappResponse: messageResponse.data,
+      messageDetails: messageData
+    });
+  } catch (error) {
+    console.error('Error sending media message:', error.response ? error.response.data : error.message);
+    res.status(500).json({ error: 'Error sending media message', details: error.message });
+  }
+});
     // Store the message in your database to maintain conversation history
     // Include details about conversationId, sender, media_url, etc.
     // Example:
