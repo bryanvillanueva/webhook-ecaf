@@ -44,7 +44,7 @@ cloudinary.config({
   api_secret: process.env.API_SECRET
 });
 
-const upload = multer({ storage }); // Esto es necesario
+
 
 
 // Configure multer to store the file in memory
@@ -57,6 +57,8 @@ const storage = new CloudinaryStorage({
     public_id: (req, file) => Date.now() + '-' + file.originalname
   }
 });
+
+const upload = multer({ storage }); // Esto es necesario
 
 // Token de verificación
 const PHONE_NUMBER_ID = '559822483873940';
