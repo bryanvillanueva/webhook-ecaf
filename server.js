@@ -503,13 +503,13 @@ app.get('/api/dashboard-info', (req, res) => {
 // Endpoint to send media messages (documents or images) from the frontend
 app.post('/api/send-media', upload.single('file'), async (req, res) => {
   try {
-    const { to, mediaType, caption, conversationId } = req.body;
+    const { to, caption, conversationId } = req.body;
     
-    if (!to || !mediaType || !req.file) {
-      return res.status(400).json({ error: 'Missing required fields: to, mediaType, and file are required.' });
+    if (!to || !req.file) {
+      return res.status(400).json({ error: 'Missing required fields: to and file are required.' });
     }
     
-    // Create form-data using the form-data package
+    // Crear form-data para enviar la imagen a WhatsApp
     const form = new FormData();
     form.append('messaging_product', 'whatsapp');
     form.append('file', req.file.buffer, {
@@ -517,7 +517,7 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
       contentType: req.file.mimetype,
     });
     
-    // Upload the media file to WhatsApp
+    // Subir la imagen a WhatsApp
     const mediaUploadUrl = `https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/media`;
     const mediaResponse = await axios.post(mediaUploadUrl, form, {
       headers: {
@@ -527,27 +527,18 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
     });
 
     const mediaId = mediaResponse.data.id;
-    console.log('Media uploaded, id:', mediaId);
+    console.log('✅ Media uploaded, id:', mediaId);
 
-    // Prepare the payload for sending the media message
+    // Construir el payload para enviar el mensaje con la imagen
     const messagesUrl = `https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/messages`;
-    let payload = {
+    const payload = {
       messaging_product: 'whatsapp',
       to,
-      type: mediaType,
+      type: 'image',
+      image: { id: mediaId, caption: caption || '' },
     };
 
-    if (mediaType === 'image') {
-      payload.image = { id: mediaId, caption: caption || '' };
-    } else if (mediaType === 'document') {
-      payload.document = { id: mediaId, caption: caption || '' };
-    } else if (mediaType === 'audio') {
-      payload.audio = { id: mediaId };
-    } else {
-      return res.status(400).json({ error: 'Unsupported mediaType. Use "image", "document", or "audio".' });
-    }
-
-    // Send the media message using the uploaded media ID
+    // Enviar la imagen mediante la API de WhatsApp
     const messageResponse = await axios.post(messagesUrl, payload, {
       headers: {
         'Authorization': `Bearer ${ACCESS_TOKEN}`,
@@ -555,30 +546,43 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
       },
     });
 
-    // Store message in the database
-    const now = new Date();
-    const messageData = {
-      message_id: messageResponse.data.messages[0].id,
-      conversation_id: conversationId,
-      sender: 'Sharky',
-      message: caption || '',
-      message_type: mediaType,
-      media_id: mediaId,
-      media_url: `${mediaId}`,
-      sent_at: now.toISOString()
-    };
+    console.log('✅ Media message sent to WhatsApp:', messageResponse.data);
 
-    res.status(200).json({ 
-      message: 'Media sent successfully', 
-      mediaId, 
-      whatsappResponse: messageResponse.data,
-      messageDetails: messageData
+    // Obtener la URL de la imagen subida
+    const getMediaUrl = `https://graph.facebook.com/v22.0/${mediaId}`;
+    const mediaUrlResponse = await axios.get(getMediaUrl, {
+      params: { access_token: ACCESS_TOKEN },
     });
+
+    const mediaUrl = mediaUrlResponse.data.url;
+
+    // Guardar en la base de datos con message_type = 'img'
+    const sql = `
+      INSERT INTO messages (conversation_id, sender, message_type, media_id, media_url, message, sent_at)
+      VALUES (?, ?, 'img', ?, ?, ?, NOW())
+    `;
+
+    db.query(sql, [conversationId, 'Sharky', mediaId, mediaUrl, caption || ''], (err, result) => {
+      if (err) {
+        console.error('❌ Error al guardar mensaje en la base de datos:', err.message);
+        return res.status(500).json({ error: 'Error al guardar mensaje en la base de datos' });
+      }
+
+      res.status(200).json({
+        message: '✅ Media sent and stored successfully',
+        mediaId,
+        mediaUrl,
+        whatsappResponse: messageResponse.data,
+        insertId: result.insertId
+      });
+    });
+
   } catch (error) {
-    console.error('Error sending media message:', error.response ? error.response.data : error.message);
+    console.error('❌ Error sending media message:', error.response ? error.response.data : error.message);
     res.status(500).json({ error: 'Error sending media message', details: error.message });
   }
 });
+
 
 // 📌 Endpoint para agendar citas en la base de datos
 app.post('/appointments', (req, res) => {
