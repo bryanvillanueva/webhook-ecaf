@@ -500,6 +500,7 @@ app.get('/api/dashboard-info', (req, res) => {
 // - mediaType: either "image" or "document"
 // - caption: (optional) caption for the media message
 // And a file uploaded with key "file"
+// Endpoint to send media messages (documents or images) from the frontend
 app.post('/api/send-media', upload.single('file'), async (req, res) => {
   try {
     const { to, mediaType, caption, conversationId } = req.body;
@@ -520,14 +521,14 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
     const mediaUploadUrl = `https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/media`;
     const mediaResponse = await axios.post(mediaUploadUrl, form, {
       headers: {
-        ...form.getHeaders(), // This will work with the form-data package
+        ...form.getHeaders(),
         'Authorization': `Bearer ${ACCESS_TOKEN}`,
       },
     });
-    
+
     const mediaId = mediaResponse.data.id;
     console.log('Media uploaded, id:', mediaId);
-    
+
     // Prepare the payload for sending the media message
     const messagesUrl = `https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/messages`;
     let payload = {
@@ -535,7 +536,7 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
       to,
       type: mediaType,
     };
-    
+
     if (mediaType === 'image') {
       payload.image = { id: mediaId, caption: caption || '' };
     } else if (mediaType === 'document') {
@@ -545,7 +546,7 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
     } else {
       return res.status(400).json({ error: 'Unsupported mediaType. Use "image", "document", or "audio".' });
     }
-    
+
     // Send the media message using the uploaded media ID
     const messageResponse = await axios.post(messagesUrl, payload, {
       headers: {
@@ -553,8 +554,8 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
         'Content-Type': 'application/json',
       },
     });
-    
-    // Store message in your database
+
+    // Store message in the database
     const now = new Date();
     const messageData = {
       message_id: messageResponse.data.messages[0].id,
@@ -563,12 +564,10 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
       message: caption || '',
       message_type: mediaType,
       media_id: mediaId,
-      media_url: `${mediaId}`, // Your download URL logic
+      media_url: `${mediaId}`,
       sent_at: now.toISOString()
     };
-    
-    // Save to your database logic here
-    
+
     res.status(200).json({ 
       message: 'Media sent successfully', 
       mediaId, 
@@ -580,36 +579,7 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
     res.status(500).json({ error: 'Error sending media message', details: error.message });
   }
 });
-    // Store the message in your database to maintain conversation history
-    // Include details about conversationId, sender, media_url, etc.
-    // Example:
-    const now = new Date();
-    const messageData = {
-      message_id: messageResponse.data.messages[0].id,
-      conversation_id: conversationId,
-      sender: 'Sharky',
-      message: caption || '',
-      message_type: mediaType,
-      media_id: mediaId,
-      media_url: `${YOUR_API_BASE_URL}/api/download-media?mediaId=${mediaId}`, // You'll need to implement this endpoint
-      sent_at: now.toISOString()
-    };
-    
-    // Save to your database
-    // await db.collection('messages').insertOne(messageData);
-    
-    res.status(200).json({ 
-      message: 'Media sent successfully', 
-      mediaId, 
-      whatsappResponse: messageResponse.data,
-      messageDetails: messageData
-    });
-  } catch (error) {
-    console.error('Error sending media message:', error.response ? error.response.data : error.message);
-    res.status(500).json({ error: 'Error sending media message', details: error.message });
-  }
-});
-  
+
 // 📌 Endpoint para agendar citas en la base de datos
 app.post('/appointments', (req, res) => {
     const { phone_number, name, email, city, description, preferred_date, preferred_time, mode } = req.body;
