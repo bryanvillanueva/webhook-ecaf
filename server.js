@@ -5,6 +5,8 @@ const cors = require('cors'); // Para habilitar CORS
 const multer = require('multer');
 const mysql = require('mysql2'); // Para conectarse a la base de datos
 const FormData = require('form-data'); // Add this import at the top of your file
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
 
 const app = express();
@@ -34,9 +36,24 @@ db.getConnection((err, connection) => {
     }
 });
 
+
+// Configurar Cloudinary con variables de entorno
+cloudinary.config({
+  cloud_name: process.env.CLOUD_NAME,
+  api_key: process.env.API_KEY,
+  api_secret: process.env.API_SECRET
+});
+
 // Configure multer to store the file in memory
-const storage = multer.memoryStorage();
-const upload = multer({ storage });
+
+const storage = new CloudinaryStorage({
+  cloudinary,
+  params: {
+    folder: 'chat_images', // Carpeta donde se almacenarán las imágenes
+    format: async (req, file) => 'png', // Formato de la imagen
+    public_id: (req, file) => Date.now() + '-' + file.originalname
+  }
+});
 
 // Token de verificación
 const PHONE_NUMBER_ID = '559822483873940';
