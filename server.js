@@ -26,7 +26,7 @@ const db = mysql.createPool({
     charset: 'utf8mb4'
 });
 
-// Verifica la conexión
+// Verifica la conexión a la base de datos
 db.getConnection((err, connection) => {
     if (err) {
         console.error('❌ Error al conectar a la base de datos:', err.message);
