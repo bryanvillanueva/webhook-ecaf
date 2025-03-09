@@ -439,7 +439,7 @@ app.get('/api/download-media', async (req, res) => {
   });
 
 // 📌 Endpoint para editar mensajes
-app.put('/api/edit-message/:messageId', async (req, res) => {
+app.put('/api/edit-message/:messageId', (req, res) => {
   const { messageId } = req.params;
   const { newMessage } = req.body;
 
@@ -447,98 +447,48 @@ app.put('/api/edit-message/:messageId', async (req, res) => {
     return res.status(400).json({ error: 'Message ID and new message are required' });
   }
 
-  try {
-    // Check if message exists first
-    const checkSql = 'SELECT * FROM messages WHERE id = ?';
-    db.query(checkSql, [messageId], (checkErr, checkResult) => {
-      if (checkErr) {
-        console.error('❌ Error al verificar el mensaje:', checkErr.message);
-        return res.status(500).json({ error: 'Error al verificar el mensaje' });
-      }
+  const sql = 'UPDATE messages SET message = ? WHERE id = ?';
+  db.query(sql, [newMessage, messageId], (err, result) => {
+    if (err) {
+      console.error('❌ Error al actualizar el mensaje en la base de datos:', err.message);
+      return res.status(500).json({ error: 'Error al actualizar el mensaje en la base de datos' });
+    }
 
-      if (checkResult.length === 0) {
-        return res.status(404).json({ error: 'Mensaje no encontrado' });
-      }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Mensaje no encontrado o sin cambios' });
+    }
 
-      // Update the message
-      const updateSql = 'UPDATE messages SET message = ?, updated_at = NOW() WHERE id = ?';
-      db.query(updateSql, [newMessage, messageId], (updateErr, updateResult) => {
-        if (updateErr) {
-          console.error('❌ Error al actualizar el mensaje en la base de datos:', updateErr.message);
-          return res.status(500).json({ error: 'Error al actualizar el mensaje en la base de datos' });
-        }
-
-        if (updateResult.affectedRows === 0) {
-          return res.status(404).json({ error: 'No se pudo actualizar el mensaje' });
-        }
-
-        // Get the updated message to send back to client
-        const getUpdatedSql = 'SELECT * FROM messages WHERE id = ?';
-        db.query(getUpdatedSql, [messageId], (getErr, getMessage) => {
-          if (getErr) {
-            console.error('❌ Error al obtener el mensaje actualizado:', getErr.message);
-            return res.status(200).json({ 
-              message: 'Mensaje actualizado correctamente',
-              updatedMessage: { id: messageId, message: newMessage }
-            });
-          }
-
-          res.status(200).json({ 
-            message: 'Mensaje actualizado correctamente',
-            updatedMessage: getMessage[0]
-          });
-        });
-      });
+    res.status(200).json({ 
+      message: 'Mensaje actualizado correctamente',
+      messageId: messageId,
+      newContent: newMessage
     });
-  } catch (error) {
-    console.error('❌ Error al editar el mensaje:', error.message);
-    res.status(500).json({ error: 'Error al editar el mensaje' });
-  }
+  });
 });
-
 // 📌 Endpoint para eliminar mensajes
-app.delete('/api/delete-message/:messageId', async (req, res) => {
+app.delete('/api/delete-message/:messageId', (req, res) => {
   const { messageId } = req.params;
 
   if (!messageId) {
     return res.status(400).json({ error: 'Message ID is required' });
   }
 
-  try {
-    // Check if message exists first
-    const checkSql = 'SELECT * FROM messages WHERE id = ?';
-    db.query(checkSql, [messageId], (checkErr, checkResult) => {
-      if (checkErr) {
-        console.error('❌ Error al verificar el mensaje:', checkErr.message);
-        return res.status(500).json({ error: 'Error al verificar el mensaje' });
-      }
+  const sql = 'DELETE FROM messages WHERE id = ?';
+  db.query(sql, [messageId], (err, result) => {
+    if (err) {
+      console.error('❌ Error al eliminar el mensaje en la base de datos:', err.message);
+      return res.status(500).json({ error: 'Error al eliminar el mensaje en la base de datos' });
+    }
 
-      if (checkResult.length === 0) {
-        return res.status(404).json({ error: 'Mensaje no encontrado' });
-      }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Mensaje no encontrado' });
+    }
 
-      // Delete the message
-      const deleteSql = 'DELETE FROM messages WHERE id = ?';
-      db.query(deleteSql, [messageId], (deleteErr, deleteResult) => {
-        if (deleteErr) {
-          console.error('❌ Error al eliminar el mensaje en la base de datos:', deleteErr.message);
-          return res.status(500).json({ error: 'Error al eliminar el mensaje en la base de datos' });
-        }
-
-        if (deleteResult.affectedRows === 0) {
-          return res.status(404).json({ error: 'No se pudo eliminar el mensaje' });
-        }
-
-        res.status(200).json({ 
-          message: 'Mensaje eliminado correctamente',
-          deletedMessageId: messageId
-        });
-      });
+    res.status(200).json({ 
+      message: 'Mensaje eliminado correctamente',
+      messageId: messageId
     });
-  } catch (error) {
-    console.error('❌ Error al eliminar el mensaje:', error.message);
-    res.status(500).json({ error: 'Error al eliminar el mensaje' });
-  }
+  });
 });
 
 
