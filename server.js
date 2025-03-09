@@ -606,13 +606,15 @@ app.post('/api/send-media', upload.single('file'), async (req, res) => {
 });
 
 // Endpoint para obtener la URL de una imagen desde la base de datos o renovarla si ha expirado
-// Solo para imágenes, no procesa audios
 app.get('/api/media-url/:mediaId', async (req, res) => {
   const { mediaId } = req.params;
+  const forceRefresh = req.query.refresh === 'true';
 
   if (!mediaId) {
     return res.status(400).json({ error: 'Media ID is required' });
   }
+
+  console.log(`🔍 Solicitud de URL para media: ${mediaId}${forceRefresh ? ' (forzando actualización)' : ''}`);
 
   try {
     // Buscar la URL y el tipo de mensaje en la base de datos
@@ -624,54 +626,74 @@ app.get('/api/media-url/:mediaId', async (req, res) => {
       }
 
       if (results.length === 0) {
+        console.error(`❌ Media ID ${mediaId} no encontrado en la base de datos`);
         return res.status(404).json({ error: 'Media not found in database' });
       }
 
       const mediaUrl = results[0].media_url;
       const messageType = results[0].message_type;
       
-      console.log(`🔍 Procesando media: ID=${mediaId}, Type=${messageType}, URL=${mediaUrl}`);
+      console.log(`ℹ️ Media encontrado: ID=${mediaId}, Type=${messageType}, URL=${mediaUrl?.substring(0, 30)}...`);
 
-      // Verificar si es una imagen, si no lo es, solo devolver la URL actual
+      // Si no es una imagen o no tiene URL, solo devolver lo que hay
       if (messageType !== 'image') {
         console.log(`⚠️ Media ID ${mediaId} no es una imagen (tipo: ${messageType}). Retornando URL actual.`);
         return res.json({ mediaUrl });
       }
 
-      // Es una imagen, validamos si la URL sigue siendo válida
-      try {
-        const response = await axios.head(mediaUrl);
-        if (response.status === 200) {
-          console.log(`✅ URL de imagen válida para ${mediaId}`);
-          return res.json({ mediaUrl });
+      // Verificar si debemos renovar la URL (sea porque está expirada o porque se fuerza la actualización)
+      let needsRefresh = forceRefresh;
+      
+      if (!forceRefresh) {
+        try {
+          const response = await axios.head(mediaUrl);
+          if (response.status === 200) {
+            console.log(`✅ URL de imagen válida para ${mediaId}`);
+            needsRefresh = false;
+          } else {
+            console.log(`⚠️ URL de imagen para ${mediaId} devolvió estado ${response.status}`);
+            needsRefresh = true;
+          }
+        } catch (error) {
+          console.log(`🔄 URL de imagen expirada para ${mediaId}, validación falló: ${error.message}`);
+          needsRefresh = true;
         }
-      } catch (error) {
-        console.log(`🔄 URL de imagen expirada para ${mediaId}, obteniendo nueva...`);
       }
 
-      // La URL está expirada, obtener una nueva desde WhatsApp
-      try {
-        const mediaResponse = await axios.get(`https://graph.facebook.com/v18.0/${mediaId}`, {
-          params: { access_token: ACCESS_TOKEN }
-        });
+      // Si necesitamos actualizar la URL, obtener una nueva desde la API de WhatsApp
+      if (needsRefresh) {
+        try {
+          console.log(`🔄 Obteniendo nueva URL para ${mediaId} desde la API de WhatsApp...`);
+          const mediaResponse = await axios.get(`https://graph.facebook.com/v18.0/${mediaId}`, {
+            params: { access_token: ACCESS_TOKEN }
+          });
 
-        const newMediaUrl = mediaResponse.data.url;
-        console.log(`🆕 Nueva URL obtenida para ${mediaId}: ${newMediaUrl.substring(0, 30)}...`);
-
-        // Actualizar la URL en la base de datos
-        const updateSql = 'UPDATE messages SET media_url = ? WHERE media_id = ?';
-        db.query(updateSql, [newMediaUrl, mediaId], (updateErr) => {
-          if (updateErr) {
-            console.error(`❌ Error actualizando la media_url en la BD: ${updateErr.message}`);
-          } else {
-            console.log(`✅ URL actualizada en BD para ${mediaId}`);
+          if (!mediaResponse.data || !mediaResponse.data.url) {
+            console.error(`❌ La API de WhatsApp no devolvió una URL válida para ${mediaId}`);
+            return res.status(500).json({ error: 'No se pudo obtener una nueva URL desde WhatsApp' });
           }
-        });
 
-        return res.json({ mediaUrl: newMediaUrl });
-      } catch (error) {
-        console.error(`❌ Error obteniendo la nueva media URL: ${error.message}`);
-        return res.status(500).json({ error: 'Error obteniendo la nueva media URL' });
+          const newMediaUrl = mediaResponse.data.url;
+          console.log(`🆕 Nueva URL obtenida para ${mediaId}: ${newMediaUrl.substring(0, 30)}...`);
+
+          // Actualizar la URL en la base de datos
+          const updateSql = 'UPDATE messages SET media_url = ? WHERE media_id = ?';
+          db.query(updateSql, [newMediaUrl, mediaId], (updateErr) => {
+            if (updateErr) {
+              console.error(`❌ Error actualizando la media_url en la BD: ${updateErr.message}`);
+            } else {
+              console.log(`✅ URL actualizada en BD para ${mediaId}`);
+            }
+          });
+
+          return res.json({ mediaUrl: newMediaUrl });
+        } catch (error) {
+          console.error(`❌ Error obteniendo la nueva media URL: ${error.message}`);
+          return res.status(500).json({ error: 'Error obteniendo la nueva media URL' });
+        }
+      } else {
+        // Devolver la URL actual si sigue siendo válida
+        return res.json({ mediaUrl });
       }
     });
   } catch (error) {
@@ -679,7 +701,6 @@ app.get('/api/media-url/:mediaId', async (req, res) => {
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
-
 
 // 📌 Endpoint para agendar citas en la base de datos
 app.post('/appointments', (req, res) => {
