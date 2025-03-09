@@ -49,14 +49,7 @@ cloudinary.config({
 
 // Configure multer to store the file in memory
 
-const storage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: 'chat_images', // Carpeta donde se almacenarán las imágenes
-    format: async (req, file) => 'png', // Formato de la imagen
-    public_id: (req, file) => Date.now() + '-' + file.originalname
-  }
-});
+const storage = multer.memoryStorage();
 
 const upload = multer({ storage }); // Esto es necesario
 
@@ -523,85 +516,140 @@ app.get('/api/dashboard-info', (req, res) => {
 // - caption: (optional) caption for the media message
 // And a file uploaded with key "file"
 // Endpoint to send media messages (documents or images) from the frontend
+// Endpoint para enviar imágenes según la documentación oficial de WhatsApp
 app.post('/api/send-media', upload.single('file'), async (req, res) => {
   try {
-    const { to, caption, conversationId } = req.body;
+    console.log('📝 Solicitud para enviar media recibida');
+    const { to, conversationId, caption = '', sender = 'Sharky' } = req.body;
     
-    if (!to || !req.file) {
-      return res.status(400).json({ error: 'Missing required fields: to and file are required.' });
+    if (!to || !conversationId) {
+      console.error('❌ Faltan campos requeridos: to y conversationId');
+      return res.status(400).json({ error: 'Missing required fields: to and conversationId are required.' });
     }
     
-    // Crear form-data para enviar la imagen a WhatsApp
+    if (!req.file) {
+      console.error('❌ No se encontró el archivo en la solicitud');
+      return res.status(400).json({ error: 'No file was uploaded.' });
+    }
+
+    // Determinar el tipo de medio basado en MIME
+    let mediaType = 'document';
+    if (req.file.mimetype.startsWith('image/')) {
+      mediaType = 'image';
+    } else if (req.file.mimetype.startsWith('audio/')) {
+      mediaType = 'audio';
+    } else if (req.file.mimetype.startsWith('video/')) {
+      mediaType = 'video';
+    }
+    
+    console.log(`📤 Preparando para enviar ${mediaType} a ${to}`);
+    
+    // 1. Primero, cargar el archivo multimedia a la API de WhatsApp
     const form = new FormData();
     form.append('messaging_product', 'whatsapp');
     form.append('file', req.file.buffer, {
       filename: req.file.originalname,
-      contentType: req.file.mimetype,
+      contentType: req.file.mimetype
     });
     
-    // Subir la imagen a WhatsApp
-    const mediaUploadUrl = `https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/media`;
-    const mediaResponse = await axios.post(mediaUploadUrl, form, {
-      headers: {
-        ...form.getHeaders(),
-        'Authorization': `Bearer ${ACCESS_TOKEN}`,
-      },
-    });
-
-    const mediaId = mediaResponse.data.id;
-    console.log('✅ Media uploaded, id:', mediaId);
-
-    // Construir el payload para enviar el mensaje con la imagen
-    const messagesUrl = `https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/messages`;
-    const payload = {
-      messaging_product: 'whatsapp',
-      to,
-      type: 'image',
-      image: { id: mediaId, caption: caption || '' },
-    };
-
-    // Enviar la imagen mediante la API de WhatsApp
-    const messageResponse = await axios.post(messagesUrl, payload, {
-      headers: {
-        'Authorization': `Bearer ${ACCESS_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    console.log('✅ Media message sent to WhatsApp:', messageResponse.data);
-
-    // Obtener la URL de la imagen subida
-    const getMediaUrl = `https://graph.facebook.com/v22.0/${mediaId}`;
-    const mediaUrlResponse = await axios.get(getMediaUrl, {
-      params: { access_token: ACCESS_TOKEN },
-    });
-
-    const mediaUrl = mediaUrlResponse.data.url;
-
-    // Guardar en la base de datos con message_type = 'img'
-    const sql = `
-      INSERT INTO messages (conversation_id, sender, message_type, media_id, media_url, message, sent_at)
-      VALUES (?, ?, 'img', ?, ?, ?, NOW())
-    `;
-
-    db.query(sql, [conversationId, 'Sharky', mediaId, mediaUrl, caption || ''], (err, result) => {
-      if (err) {
-        console.error('❌ Error al guardar mensaje en la base de datos:', err.message);
-        return res.status(500).json({ error: 'Error al guardar mensaje en la base de datos' });
-      }
-
-      res.status(200).json({
-        message: '✅ Media sent and stored successfully',
-        mediaId,
-        mediaUrl,
-        whatsappResponse: messageResponse.data,
-        insertId: result.insertId
+    console.log('📤 Subiendo media a WhatsApp API...');
+    const mediaUploadUrl = `https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/media`;
+    
+    try {
+      const mediaResponse = await axios.post(mediaUploadUrl, form, {
+        headers: {
+          ...form.getHeaders(),
+          'Authorization': `Bearer ${ACCESS_TOKEN}`
+        }
       });
-    });
-
+      
+      if (!mediaResponse.data || !mediaResponse.data.id) {
+        console.error('❌ La API de WhatsApp no devolvió un ID de media válido');
+        return res.status(500).json({ error: 'Failed to upload media to WhatsApp.' });
+      }
+      
+      const mediaId = mediaResponse.data.id;
+      console.log(`✅ Media subido correctamente, ID: ${mediaId}`);
+      
+      // 2. Enviar el mensaje con el ID del multimedia
+      const messagesUrl = `https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`;
+      const payload = {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to,
+        type: mediaType
+      };
+      
+      // Añadir el objeto de medio según el tipo
+      payload[mediaType] = { 
+        id: mediaId,
+        caption: caption || ''
+      };
+      
+      console.log(`📤 Enviando mensaje con ${mediaType}...`);
+      
+      const messageResponse = await axios.post(messagesUrl, payload, {
+        headers: {
+          'Authorization': `Bearer ${ACCESS_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      console.log(`✅ Mensaje con media enviado: ${JSON.stringify(messageResponse.data)}`);
+      
+      // 3. Obtener la URL del multimedia para acceder al contenido
+      console.log(`🔍 Obteniendo URL para el media ID: ${mediaId}...`);
+      const getMediaUrl = `https://graph.facebook.com/v18.0/${mediaId}`;
+      const mediaUrlResponse = await axios.get(getMediaUrl, {
+        params: { access_token: ACCESS_TOKEN }
+      });
+      
+      if (!mediaUrlResponse.data || !mediaUrlResponse.data.url) {
+        console.error('❌ No se pudo obtener la URL del media');
+        return res.status(500).json({ error: 'Failed to get media URL from WhatsApp.' });
+      }
+      
+      const mediaUrl = mediaUrlResponse.data.url;
+      console.log(`✅ URL del media obtenida: ${mediaUrl.substring(0, 30)}...`);
+      
+      // 4. Guardar en la base de datos
+      const sql = `
+        INSERT INTO messages (conversation_id, sender, message_type, media_id, media_url, message, sent_at)
+        VALUES (?, ?, ?, ?, ?, ?, NOW())
+      `;
+      
+      db.query(sql, [conversationId, sender, mediaType, mediaId, mediaUrl, caption || ''], (err, result) => {
+        if (err) {
+          console.error(`❌ Error al guardar mensaje en la BD: ${err.message}`);
+          return res.status(500).json({ error: 'Error al guardar mensaje en la base de datos' });
+        }
+        
+        console.log(`✅ Mensaje con media guardado en BD, ID: ${result.insertId}`);
+        
+        // 5. Responder al cliente con la información necesaria
+        res.status(200).json({
+          message: `${mediaType} sent and stored successfully`,
+          mediaId,
+          mediaUrl,
+          messageId: result.insertId
+        });
+      });
+      
+    } catch (apiError) {
+      console.error('❌ Error en la API de WhatsApp:', 
+                    apiError.response?.data ? JSON.stringify(apiError.response.data) : apiError.message);
+      return res.status(apiError.response?.status || 500).json({
+        error: 'Error with WhatsApp API',
+        details: apiError.response?.data || apiError.message
+      });
+    }
+    
   } catch (error) {
-    console.error('❌ Error sending media message:', error.response ? error.response.data : error.message);
-    res.status(500).json({ error: 'Error sending media message', details: error.message });
+    console.error(`❌ Error general enviando media: ${error.message}`);
+    res.status(500).json({ 
+      error: 'Error sending media message', 
+      details: error.message 
+    });
   }
 });
 
