@@ -444,35 +444,22 @@ app.put('/api/edit-message/:messageId', async (req, res) => {
   const { newMessage } = req.body;
 
   if (!messageId || !newMessage) {
-      return res.status(400).json({ error: 'Message ID and new message are required' });
+    return res.status(400).json({ error: 'Message ID and new message are required' });
   }
 
   try {
-      // 1. Actualizar el mensaje en WhatsApp
-      const url = `https://graph.facebook.com/v18.0/${messageId}`;
-      const response = await axios.post(url, {
-          messaging_product: 'whatsapp',
-          text: { body: newMessage }
-      }, {
-          headers: {
-              'Authorization': `Bearer ${ACCESS_TOKEN}`,
-              'Content-Type': 'application/json'
-          }
-      });
+    const sql = 'UPDATE messages SET message = ? WHERE id = ?';
+    db.query(sql, [newMessage, messageId], (err, result) => {
+      if (err) {
+        console.error('❌ Error al actualizar el mensaje en la base de datos:', err.message);
+        return res.status(500).json({ error: 'Error al actualizar el mensaje en la base de datos' });
+      }
 
-      // 2. Actualizar el mensaje en la base de datos
-      const sql = 'UPDATE messages SET message = ? WHERE id = ?';
-      db.query(sql, [newMessage, messageId], (err, result) => {
-          if (err) {
-              console.error('❌ Error al actualizar el mensaje en la base de datos:', err.message);
-              return res.status(500).json({ error: 'Error al actualizar el mensaje en la base de datos' });
-          }
-
-          res.status(200).json({ message: 'Mensaje actualizado correctamente', data: response.data });
-      });
+      res.status(200).json({ message: 'Mensaje actualizado correctamente' });
+    });
   } catch (error) {
-      console.error('❌ Error al editar el mensaje:', error.response ? error.response.data : error.message);
-      res.status(500).json({ error: 'Error al editar el mensaje' });
+    console.error('❌ Error al editar el mensaje:', error.message);
+    res.status(500).json({ error: 'Error al editar el mensaje' });
   }
 });
 
@@ -481,32 +468,22 @@ app.delete('/api/delete-message/:messageId', async (req, res) => {
   const { messageId } = req.params;
 
   if (!messageId) {
-      return res.status(400).json({ error: 'Message ID is required' });
+    return res.status(400).json({ error: 'Message ID is required' });
   }
 
   try {
-      // 1. Eliminar el mensaje en WhatsApp
-      const url = `https://graph.facebook.com/v18.0/${messageId}`;
-      const response = await axios.delete(url, {
-          headers: {
-              'Authorization': `Bearer ${ACCESS_TOKEN}`,
-              'Content-Type': 'application/json'
-          }
-      });
+    const sql = 'DELETE FROM messages WHERE id = ?';
+    db.query(sql, [messageId], (err, result) => {
+      if (err) {
+        console.error('❌ Error al eliminar el mensaje en la base de datos:', err.message);
+        return res.status(500).json({ error: 'Error al eliminar el mensaje en la base de datos' });
+      }
 
-      // 2. Eliminar el mensaje en la base de datos
-      const sql = 'DELETE FROM messages WHERE id = ?';
-      db.query(sql, [messageId], (err, result) => {
-          if (err) {
-              console.error('❌ Error al eliminar el mensaje en la base de datos:', err.message);
-              return res.status(500).json({ error: 'Error al eliminar el mensaje en la base de datos' });
-          }
-
-          res.status(200).json({ message: 'Mensaje eliminado correctamente', data: response.data });
-      });
+      res.status(200).json({ message: 'Mensaje eliminado correctamente' });
+    });
   } catch (error) {
-      console.error('❌ Error al eliminar el mensaje:', error.response ? error.response.data : error.message);
-      res.status(500).json({ error: 'Error al eliminar el mensaje' });
+    console.error('❌ Error al eliminar el mensaje:', error.message);
+    res.status(500).json({ error: 'Error al eliminar el mensaje' });
   }
 });
 
