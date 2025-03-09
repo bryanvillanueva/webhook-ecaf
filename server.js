@@ -610,61 +610,61 @@ app.get('/api/media-url/:mediaId', async (req, res) => {
   const { mediaId } = req.params;
 
   if (!mediaId) {
-      return res.status(400).json({ error: 'Media ID is required' });
+    return res.status(400).json({ error: 'Media ID is required' });
   }
 
   try {
-      // Buscar la URL en la base de datos
-      const sql = 'SELECT media_url FROM messages WHERE media_id = ? LIMIT 1';
-      db.query(sql, [mediaId], async (err, results) => {
-          if (err) {
-              console.error('❌ Error al obtener media_url:', err.message);
-              return res.status(500).json({ error: 'Error al obtener media_url' });
+    // Buscar la URL en la base de datos
+    const sql = 'SELECT media_url FROM messages WHERE media_id = ? LIMIT 1';
+    db.query(sql, [mediaId], async (err, results) => {
+      if (err) {
+        console.error('❌ Error al obtener media_url:', err.message);
+        return res.status(500).json({ error: 'Error al obtener media_url' });
+      }
+
+      if (results.length === 0) {
+        return res.status(404).json({ error: 'Media not found in database' });
+      }
+
+      let mediaUrl = results[0].media_url;
+
+      // Intentar acceder a la URL actual
+      try {
+        const response = await axios.head(mediaUrl); // Solo verificamos si la URL es válida
+        if (response.status === 200) {
+          return res.json({ mediaUrl }); // Cambio aquí: devolvemos mediaUrl como propiedad
+        }
+      } catch (error) {
+        console.log('🔄 URL posiblemente expirada, obteniendo nueva...');
+      }
+
+      // Si la URL está expirada, obtener una nueva desde WhatsApp
+      try {
+        const mediaResponse = await axios.get(`https://graph.facebook.com/v18.0/${mediaId}`, {
+          params: { access_token: ACCESS_TOKEN }
+        });
+
+        const newMediaUrl = mediaResponse.data.url;
+
+        // Actualizar la URL en la base de datos
+        const updateSql = 'UPDATE messages SET media_url = ? WHERE media_id = ?';
+        db.query(updateSql, [newMediaUrl, mediaId], (updateErr) => {
+          if (updateErr) {
+            console.error('❌ Error actualizando la media_url en la BD:', updateErr.message);
           }
+        });
 
-          if (results.length === 0) {
-              return res.status(404).json({ error: 'Media not found in database' });
-          }
+        return res.json({ mediaUrl: newMediaUrl }); // Cambio aquí: consistencia en la propiedad
 
-          let mediaUrl = results[0].media_url;
-
-          // Intentar acceder a la URL actual
-          try {
-              const response = await axios.head(mediaUrl); // Solo verificamos si la URL es válida
-              if (response.status === 200) {
-                  return res.json({ mediaUrl });
-              }
-          } catch (error) {
-              console.log('🔄 URL posiblemente expirada, obteniendo nueva...');
-          }
-
-          // Si la URL está expirada, obtener una nueva desde WhatsApp
-          try {
-              const mediaResponse = await axios.get(`https://graph.facebook.com/v18.0/${mediaId}`, {
-                  params: { access_token: ACCESS_TOKEN }
-              });
-
-              const newMediaUrl = mediaResponse.data.url;
-
-              // Actualizar la URL en la base de datos
-              const updateSql = 'UPDATE messages SET media_url = ? WHERE media_id = ?';
-              db.query(updateSql, [newMediaUrl, mediaId], (updateErr) => {
-                  if (updateErr) {
-                      console.error('❌ Error actualizando la media_url en la BD:', updateErr.message);
-                  }
-              });
-
-              return res.json({ mediaUrl: newMediaUrl });
-
-          } catch (error) {
-              console.error('❌ Error obteniendo la nueva media URL:', error.message);
-              return res.status(500).json({ error: 'Error obteniendo la nueva media URL' });
-          }
-      });
+      } catch (error) {
+        console.error('❌ Error obteniendo la nueva media URL:', error.message);
+        return res.status(500).json({ error: 'Error obteniendo la nueva media URL' });
+      }
+    });
 
   } catch (error) {
-      console.error('❌ Error en el endpoint:', error.message);
-      res.status(500).json({ error: 'Error interno del servidor' });
+    console.error('❌ Error en el endpoint:', error.message);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
