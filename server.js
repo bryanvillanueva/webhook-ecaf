@@ -73,37 +73,46 @@ app.get('/webhook', (req, res) => {
     }
 });
 
-// 📌 Endpoint para recibir mensajes de WhatsApp y enviarlos a Make (text or audio)
+// 📌 Endpoint para recibir mensajes de WhatsApp y enviarlos a Make (text, audio, image, document)
 app.post('/webhook', async (req, res) => {
-    console.log('Mensaje recibido en Webhook:', JSON.stringify(req.body, null, 2));
-    const body = req.body;
+  console.log('Mensaje recibido en Webhook:', JSON.stringify(req.body, null, 2));
+  const body = req.body;
 
-    if (body.object) {
-        // Assume messages are in: body.entry[0].changes[0].value.messages
-        const messagesArray = body.entry?.[0]?.changes?.[0]?.value?.messages;
+  if (body.object) {
+      // Assume messages are in: body.entry[0].changes[0].value.messages
+      const messagesArray = body.entry?.[0]?.changes?.[0]?.value?.messages;
 
-        // Check if any message is of type 'audio'
-        let isAudio = false;
-        if (Array.isArray(messagesArray)) {
-            isAudio = messagesArray.some(msg => msg.type === 'audio');
-        }
+      // Determine message type
+      let messageType = 'text'; // default
+      if (Array.isArray(messagesArray)) {
+          const firstMessage = messagesArray[0];
+          if (firstMessage) {
+              messageType = firstMessage.type;
+          }
+      }
 
-        // Choose target webhook URL based on message type
-        const targetWebhook = isAudio 
-            ? 'https://hook.eu2.make.com/pch3avcjrya2et6gqol5vdoyh11txfrl' 
-            : 'https://hook.eu2.make.com/ve2tavn6hjsvscq1t3q5y6jc0m47ee68';
+      // Choose target webhook URL based on message type
+      const webhookMap = {
+          'text': 'https://hook.eu2.make.com/ve2tavn6hjsvscq1t3q5y6jc0m47ee68',
+          'audio': 'https://hook.eu2.make.com/pch3avcjrya2et6gqol5vdoyh11txfrl',
+          'image': 'https://hook.eu2.make.com/smdk4pbh2txc94fdvj73mmpt3ehdxuj3',
+          'document': 'https://hook.eu2.make.com/smdk4pbh2txc94fdvj73mmpt3ehdxuj3'
+      };
 
-        try {
-            const makeResponse = await axios.post(targetWebhook, body);
-            console.log('✅ Mensaje enviado a Make:', makeResponse.status, 'Webhook:', targetWebhook);
-        } catch (error) {
-            console.error('❌ Error al enviar mensaje a Make:', error.message);
-        }
+      // Default to text webhook if type is not recognized
+      const targetWebhook = webhookMap[messageType] || webhookMap['text'];
 
-        res.status(200).send('EVENT_RECEIVED');
-    } else {
-        res.status(404).send('No encontrado');
-    }
+      try {
+          const makeResponse = await axios.post(targetWebhook, body);
+          console.log('✅ Mensaje enviado a Make:', makeResponse.status, 'Webhook:', targetWebhook);
+      } catch (error) {
+          console.error('❌ Error al enviar mensaje a Make:', error.message);
+      }
+
+      res.status(200).send('EVENT_RECEIVED');
+  } else {
+      res.status(404).send('No encontrado');
+  }
 });
 
 
@@ -429,6 +438,77 @@ app.get('/api/download-media', async (req, res) => {
     }
   });
 
+// 📌 Endpoint para editar mensajes
+app.put('/api/edit-message/:messageId', async (req, res) => {
+  const { messageId } = req.params;
+  const { newMessage } = req.body;
+
+  if (!messageId || !newMessage) {
+      return res.status(400).json({ error: 'Message ID and new message are required' });
+  }
+
+  try {
+      // 1. Actualizar el mensaje en WhatsApp
+      const url = `https://graph.facebook.com/v18.0/${messageId}`;
+      const response = await axios.post(url, {
+          messaging_product: 'whatsapp',
+          text: { body: newMessage }
+      }, {
+          headers: {
+              'Authorization': `Bearer ${ACCESS_TOKEN}`,
+              'Content-Type': 'application/json'
+          }
+      });
+
+      // 2. Actualizar el mensaje en la base de datos
+      const sql = 'UPDATE messages SET message = ? WHERE id = ?';
+      db.query(sql, [newMessage, messageId], (err, result) => {
+          if (err) {
+              console.error('❌ Error al actualizar el mensaje en la base de datos:', err.message);
+              return res.status(500).json({ error: 'Error al actualizar el mensaje en la base de datos' });
+          }
+
+          res.status(200).json({ message: 'Mensaje actualizado correctamente', data: response.data });
+      });
+  } catch (error) {
+      console.error('❌ Error al editar el mensaje:', error.response ? error.response.data : error.message);
+      res.status(500).json({ error: 'Error al editar el mensaje' });
+  }
+});
+
+// 📌 Endpoint para eliminar mensajes
+app.delete('/api/delete-message/:messageId', async (req, res) => {
+  const { messageId } = req.params;
+
+  if (!messageId) {
+      return res.status(400).json({ error: 'Message ID is required' });
+  }
+
+  try {
+      // 1. Eliminar el mensaje en WhatsApp
+      const url = `https://graph.facebook.com/v18.0/${messageId}`;
+      const response = await axios.delete(url, {
+          headers: {
+              'Authorization': `Bearer ${ACCESS_TOKEN}`,
+              'Content-Type': 'application/json'
+          }
+      });
+
+      // 2. Eliminar el mensaje en la base de datos
+      const sql = 'DELETE FROM messages WHERE id = ?';
+      db.query(sql, [messageId], (err, result) => {
+          if (err) {
+              console.error('❌ Error al eliminar el mensaje en la base de datos:', err.message);
+              return res.status(500).json({ error: 'Error al eliminar el mensaje en la base de datos' });
+          }
+
+          res.status(200).json({ message: 'Mensaje eliminado correctamente', data: response.data });
+      });
+  } catch (error) {
+      console.error('❌ Error al eliminar el mensaje:', error.response ? error.response.data : error.message);
+      res.status(500).json({ error: 'Error al eliminar el mensaje' });
+  }
+});
 
 
   // DASHBOARD //
