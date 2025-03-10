@@ -915,7 +915,132 @@ app.get('/api/download-image/:mediaId', async (req, res) => {
   }
 });
 
+// Endpoint proxy para descargar documentos desde WhatsApp
+app.get('/api/download-document/:mediaId', async (req, res) => {
+  const { mediaId } = req.params;
+  
+  if (!mediaId) {
+    return res.status(400).json({ error: 'Media ID is required' });
+  }
+  
+  console.log(`🔍 Solicitud para descargar documento con ID: ${mediaId}`);
+  
+  try {
+    // 1. Primero obtener la URL y el tipo de documento desde la base de datos
+    const sql = 'SELECT media_url, message_type, message AS file_name FROM messages WHERE media_id = ? LIMIT 1';
+    db.query(sql, [mediaId], async (err, results) => {
+      if (err) {
+        console.error('❌ Error al obtener media_url:', err.message);
+        return res.status(500).json({ error: 'Error al obtener media_url' });
+      }
 
+      if (results.length === 0) {
+        console.error(`❌ Media ID ${mediaId} no encontrado en la base de datos`);
+        return res.status(404).json({ error: 'Media not found in database' });
+      }
+
+      let mediaUrl = results[0].media_url;
+      const messageType = results[0].message_type;
+      // Usar el campo message como nombre del archivo si está disponible
+      const fileName = results[0].file_name || `document-${mediaId}.pdf`;
+      
+      if (messageType !== 'document') {
+        return res.status(400).json({ error: 'El media ID no corresponde a un documento' });
+      }
+      
+      // Verificar si la URL ha expirado
+      let needsRefresh = false;
+      try {
+        const response = await axios.head(mediaUrl, {
+          headers: {
+            'Authorization': `Bearer ${ACCESS_TOKEN}`
+          }
+        });
+        if (response.status !== 200) {
+          needsRefresh = true;
+        }
+      } catch (error) {
+        console.log(`🔄 URL de documento expirada, obteniendo nueva...`);
+        needsRefresh = true;
+      }
+      
+      // Si la URL expiró, obtener una nueva
+      if (needsRefresh) {
+        try {
+          const mediaResponse = await axios.get(`https://graph.facebook.com/v18.0/${mediaId}`, {
+            params: { access_token: ACCESS_TOKEN }
+          });
+          
+          if (!mediaResponse.data || !mediaResponse.data.url) {
+            return res.status(500).json({ error: 'No se pudo obtener la URL del documento' });
+          }
+          
+          mediaUrl = mediaResponse.data.url;
+          
+          // Actualizar la URL en la base de datos
+          const updateSql = 'UPDATE messages SET media_url = ? WHERE media_id = ?';
+          db.query(updateSql, [mediaUrl, mediaId], (updateErr) => {
+            if (updateErr) {
+              console.error(`❌ Error actualizando la media_url: ${updateErr.message}`);
+            } else {
+              console.log(`✅ URL actualizada en BD para ${mediaId}`);
+            }
+          });
+        } catch (error) {
+          console.error(`❌ Error obteniendo la nueva media URL: ${error.message}`);
+          return res.status(500).json({ error: 'Error obteniendo la nueva media URL' });
+        }
+      }
+      
+      // 2. Descargar el documento desde WhatsApp
+      try {
+        console.log(`📥 Descargando documento desde URL: ${mediaUrl.substring(0, 30)}...`);
+        const documentResponse = await axios.get(mediaUrl, {
+          responseType: 'arraybuffer',
+          headers: {
+            'Authorization': `Bearer ${ACCESS_TOKEN}`
+          }
+        });
+        
+        // 3. Determinar el tipo de contenido (MIME type)
+        // Si el nombre del archivo contiene una extensión, intentar determinar el MIME type basado en eso
+        let contentType = 'application/octet-stream'; // Default
+        
+        if (fileName.endsWith('.pdf')) {
+          contentType = 'application/pdf';
+        } else if (fileName.endsWith('.doc')) {
+          contentType = 'application/msword';
+        } else if (fileName.endsWith('.docx')) {
+          contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        } else if (fileName.endsWith('.xls')) {
+          contentType = 'application/vnd.ms-excel';
+        } else if (fileName.endsWith('.xlsx')) {
+          contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+        } else if (fileName.endsWith('.ppt')) {
+          contentType = 'application/vnd.ms-powerpoint';
+        } else if (fileName.endsWith('.pptx')) {
+          contentType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+        } else {
+          // Intentar determinar a partir de headers de respuesta
+          contentType = documentResponse.headers['content-type'] || contentType;
+        }
+        
+        // 4. Enviar el documento al frontend
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fileName)}"`);
+        res.setHeader('Cache-Control', 'max-age=300'); // Caché de 5 minutos
+        return res.send(Buffer.from(documentResponse.data, 'binary'));
+        
+      } catch (error) {
+        console.error(`❌ Error descargando el documento: ${error.message}`);
+        return res.status(500).json({ error: 'Error descargando el documento' });
+      }
+    });
+  } catch (error) {
+    console.error(`❌ Error general: ${error.message}`);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
 
 // 📌 Endpoint para agendar citas en la base de datos
 app.post('/appointments', (req, res) => {
