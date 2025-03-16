@@ -54,9 +54,9 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage }); // Esto es necesario
 
 // Token de verificación
-const PHONE_NUMBER_ID = '559822483873940';
-const VERIFY_TOKEN = 'Mi_Nuevo_Token_Secreto';
-const ACCESS_TOKEN = 'EAAG8R2yWJOwBO9ZBFWH5HQzmsmJxLS8hpX1kt05P42HYr2pdfIINTpJAOCWeoSYlat26qCYZBnAMADObZCZBSOxBPI1Aa55Cmn8GfHfWRPVFIBL7U8O4lAfYyDvINtxPUwiTo7Q6ceUqp8oPW2BMvlC98w2QZCpX1GmGj1X6Wpm6cdjIulA3HsedytsVKcpTB8wZDZD'; // Reemplazar con tu token real
+const PHONE_NUMBER_ID = '511705378704158';
+const VERIFY_TOKEN = 'Mi_Nuevo_Token_Secreto_ECAF';
+// const ACCESS_TOKEN = 'EAAG8R2yWJOwBO9ZBFWH5HQzmsmJxLS8hpX1kt05P42HYr2pdfIINTpJAOCWeoSYlat26qCYZBnAMADObZCZBSOxBPI1Aa55Cmn8GfHfWRPVFIBL7U8O4lAfYyDvINtxPUwiTo7Q6ceUqp8oPW2BMvlC98w2QZCpX1GmGj1X6Wpm6cdjIulA3HsedytsVKcpTB8wZDZD'; // 
 
 const fs = require('fs');
 
@@ -72,7 +72,7 @@ app.get('/webhook', (req, res) => {
         res.status(403).send('Token inválido!');
     }
 });
-
+/* 
 // 📌 Endpoint para recibir mensajes de WhatsApp y enviarlos a Make (text, audio, image, document)
 app.post('/webhook', async (req, res) => {
   console.log('Mensaje recibido en Webhook:', JSON.stringify(req.body, null, 2));
@@ -1069,7 +1069,7 @@ app.post('/appointments', (req, res) => {
         res.status(201).send({ message: '✅ Cita creada con éxito', id: result.insertId });
     });
 });
-
+ */
 // Manejo de SIGTERM para evitar cierre abrupto en Railway
 process.on("SIGTERM", () => {
     console.log("🔻 Señal SIGTERM recibida. Cerrando servidor...");
