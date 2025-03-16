@@ -56,7 +56,7 @@ const upload = multer({ storage }); // Esto es necesario */
 // Token de verificación
 const PHONE_NUMBER_ID = '511705378704158';
 const VERIFY_TOKEN = 'Mi_Nuevo_Token_Secreto_ECAF';
-const ACCESS_TOKEN = 'EAAJZASnMRogsBO1krnk1wzSGTCINEAhG36WdfcnYOBsQvvwhtE8UInjbqLo0hmAvKdfZBZACzQ3yHb41BlWhu8tpeEgQAo1J2YL7ZCjZCZC2ga3R8giZAFO1GytSZA2ZB9O2EZC8qXbJs1iy1cWrZBlDQCDqbrvkSUNEhnuEC584P31UDrCxYFVWxAoreT7cytZCNYsmBAZDZD'; // 
+const ACCESS_TOKEN = 'EAAJZASnMRogsBOyBcSh7jSjwQCRYb3i5NeZBP1sN7KgpkEN8WhvMNEym2ocH2g97vh53ZAy9GiDpZCBhSvZAuZCZBaYf173O6NahZCB3AeKDq4gEDlwy1JKYgr02dQN5Xpbfw2dx5yNlQJie3n3QlgTO2xDIbeT1ZCWlRZC1GaTDZAcX8fKzUCoA6QDVJwlNUuySIlEOQZDZD'; // 
 
 const fs = require('fs');
 
