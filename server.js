@@ -56,7 +56,7 @@ const upload = multer({ storage }); // Esto es necesario
 // Token de verificación
 const PHONE_NUMBER_ID = '511705378704158';
 const VERIFY_TOKEN = 'Mi_Nuevo_Token_Secreto_ECAF';
-// const ACCESS_TOKEN = 'EAAG8R2yWJOwBO9ZBFWH5HQzmsmJxLS8hpX1kt05P42HYr2pdfIINTpJAOCWeoSYlat26qCYZBnAMADObZCZBSOxBPI1Aa55Cmn8GfHfWRPVFIBL7U8O4lAfYyDvINtxPUwiTo7Q6ceUqp8oPW2BMvlC98w2QZCpX1GmGj1X6Wpm6cdjIulA3HsedytsVKcpTB8wZDZD'; // 
+const ACCESS_TOKEN = 'EAAJZASnMRogsBO1krnk1wzSGTCINEAhG36WdfcnYOBsQvvwhtE8UInjbqLo0hmAvKdfZBZACzQ3yHb41BlWhu8tpeEgQAo1J2YL7ZCjZCZC2ga3R8giZAFO1GytSZA2ZB9O2EZC8qXbJs1iy1cWrZBlDQCDqbrvkSUNEhnuEC584P31UDrCxYFVWxAoreT7cytZCNYsmBAZDZD'; // 
 
 const fs = require('fs');
 
@@ -72,7 +72,7 @@ app.get('/webhook', (req, res) => {
         res.status(403).send('Token inválido!');
     }
 });
-/* 
+ 
 // 📌 Endpoint para recibir mensajes de WhatsApp y enviarlos a Make (text, audio, image, document)
 app.post('/webhook', async (req, res) => {
   console.log('Mensaje recibido en Webhook:', JSON.stringify(req.body, null, 2));
@@ -132,7 +132,7 @@ app.post('/send-message', async (req, res) => {
             text: { body: response }
         };
 
-        const url = `https://graph.facebook.com/v21.0/559822483873940/messages`;
+        const url = `https://graph.facebook.com/v22.0/511705378704158/messages`;
 
         const whatsappResponse = await axios.post(url, data, {
             headers: {
@@ -149,7 +149,7 @@ app.post('/send-message', async (req, res) => {
     }
 });
 
-// End point para enviar mensajes desde el frontend a WhatsApp
+/* End point para enviar mensajes desde el frontend a WhatsApp
 
 app.post('/send-manual-message', async (req, res) => {
     // Expecting: to (recipient phone), conversationId, message (text), and optionally sender
