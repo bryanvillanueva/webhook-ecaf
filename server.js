@@ -15,7 +15,7 @@ app.use(cors());
 app.use(express.json({ extended: true }));
 app.use(express.urlencoded({ extended: true }));
 
-const db = mysql.createPool({
+/* const db = mysql.createPool({
     host: 'srv1041.hstgr.io',
     user: 'u255066530_SharkChat',
     password: 'aTg@K7$vP9Fw&iA#nz22mrhg',
@@ -24,9 +24,9 @@ const db = mysql.createPool({
     connectionLimit: 10,
     queueLimit: 0,
     charset: 'utf8mb4'
-});
+}); */
 
-// Verifica la conexión a la base de datos
+/* // Verifica la conexión a la base de datos
 db.getConnection((err, connection) => {
     if (err) {
         console.error('❌ Error al conectar a la base de datos:', err.message);
@@ -34,24 +34,24 @@ db.getConnection((err, connection) => {
         console.log('✅ Conectado a la base de datos MySQL');
         connection.release(); // Liberar la conexión
     }
-});
+}); */
 
 
-// Configurar Cloudinary con variables de entorno
+/* // Configurar Cloudinary con variables de entorno
 cloudinary.config({
   cloud_name: process.env.CLOUD_NAME,
   api_key: process.env.API_KEY,
   api_secret: process.env.API_SECRET
-});
+}) */;
 
 
 
 
-// Configure multer to store the file in memory
+/* // Configure multer to store the file in memory
 
 const storage = multer.memoryStorage();
 
-const upload = multer({ storage }); // Esto es necesario
+const upload = multer({ storage }); // Esto es necesario */
 
 // Token de verificación
 const PHONE_NUMBER_ID = '511705378704158';
