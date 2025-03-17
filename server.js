@@ -15,18 +15,18 @@ app.use(cors());
 app.use(express.json({ extended: true }));
 app.use(express.urlencoded({ extended: true }));
 
-/* const db = mysql.createPool({
+const db = mysql.createPool({
     host: 'srv1041.hstgr.io',
-    user: 'u255066530_SharkChat',
-    password: 'aTg@K7$vP9Fw&iA#nz22mrhg',
-    database: 'u255066530_ChatBoot',
+    user: 'u255066530_ecafAdmin',
+    password: 'wZ>3QG:WBk|BS0l$$BjBA0E4y',
+    database: 'u255066530_ecaf',
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
     charset: 'utf8mb4'
-}); */
+}); 
 
-/* // Verifica la conexión a la base de datos
+// Verifica la conexión a la base de datos
 db.getConnection((err, connection) => {
     if (err) {
         console.error('❌ Error al conectar a la base de datos:', err.message);
@@ -34,20 +34,20 @@ db.getConnection((err, connection) => {
         console.log('✅ Conectado a la base de datos MySQL');
         connection.release(); // Liberar la conexión
     }
-}); */
+}); 
 
 
-/* // Configurar Cloudinary con variables de entorno
+ // Configurar Cloudinary con variables de entorno
 cloudinary.config({
   cloud_name: process.env.CLOUD_NAME,
   api_key: process.env.API_KEY,
   api_secret: process.env.API_SECRET
-}) */;
+}) 
 
 
 
 
-/* // Configure multer to store the file in memory
+ // Configure multer to store the file in memory
 
 const storage = multer.memoryStorage();
 
@@ -149,7 +149,6 @@ app.post('/send-message', async (req, res) => {
     }
 });
 
-/* End point para enviar mensajes desde el frontend a WhatsApp
 
 app.post('/send-manual-message', async (req, res) => {
     // Expecting: to (recipient phone), conversationId, message (text), and optionally sender
@@ -168,7 +167,7 @@ app.post('/send-manual-message', async (req, res) => {
         text: { body: message }
       };
   
-      const url = `https://graph.facebook.com/v21.0/559822483873940/messages`;
+      const url = `https://graph.facebook.com/v22.0/511705378704158/messages`;
   
       // Send the message via the WhatsApp API
       const whatsappResponse = await axios.post(url, data, {
@@ -1069,7 +1068,7 @@ app.post('/appointments', (req, res) => {
         res.status(201).send({ message: '✅ Cita creada con éxito', id: result.insertId });
     });
 });
- */
+
 // Manejo de SIGTERM para evitar cierre abrupto en Railway
 process.on("SIGTERM", () => {
     console.log("🔻 Señal SIGTERM recibida. Cerrando servidor...");
