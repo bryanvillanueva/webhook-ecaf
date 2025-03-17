@@ -185,7 +185,7 @@ app.post('/send-manual-message', async (req, res) => {
         VALUES (?, ?, ?, NOW())
       `;
       // Use "Sharky" as default sender if not provided
-      db.query(sql, [conversationId, sender || 'Ecaf', message], (err, result) => {
+      db.query(sql, [conversationId, sender || 'Sharky', message], (err, result) => {
         if (err) {
           console.error('❌ Error storing message in DB:', err.message);
           return res.status(500).json({ error: 'Error storing message in DB' });
@@ -497,7 +497,7 @@ app.get('/api/dashboard-info', (req, res) => {
     // Total de mensajes en la tabla de mensajes
     const queryTotalMessages = 'SELECT COUNT(*) AS total_mensajes FROM messages';
     // Mensajes enviados por Sharky
-    const queryMessagesSharky = 'SELECT COUNT(*) AS mensajes_sharky FROM messages WHERE sender = "Ecaf"';
+    const queryMessagesSharky = 'SELECT COUNT(*) AS mensajes_sharky FROM messages WHERE sender = "Sharky"';
     // Total de usuarios (clientes únicos) en conversaciones
     const queryTotalUsers = 'SELECT COUNT(DISTINCT client_id) AS total_usuarios FROM conversations';
     // Mensajes pendientes: conversaciones cuyo último mensaje no fue enviado por "Sharky"
@@ -508,13 +508,13 @@ app.get('/api/dashboard-info', (req, res) => {
           (SELECT sender FROM messages WHERE conversation_id = c.id ORDER BY sent_at DESC LIMIT 1) AS last_message_sender
         FROM conversations c
       ) AS conv
-      WHERE last_message_sender != 'Ecaf'
+      WHERE last_message_sender != 'Sharky'
     `;
     // Timeline global de mensajes recibidos (sender != "Sharky"), agrupados por fecha
     const queryTimeline = `
       SELECT DATE(sent_at) AS date, COUNT(*) AS count 
       FROM messages 
-      WHERE sender != 'Ecaf'
+      WHERE sender != 'Sharky'
       GROUP BY DATE(sent_at)
       ORDER BY date ASC
     `;
@@ -580,7 +580,7 @@ app.get('/api/dashboard-info', (req, res) => {
 app.post('/api/send-media', upload.single('file'), async (req, res) => {
   try {
     console.log('📝 Solicitud para enviar media recibida');
-    const { to, conversationId, caption = '', sender = 'Ecaf' } = req.body;
+    const { to, conversationId, caption = '', sender = 'Sharky' } = req.body;
     
     if (!to || !conversationId) {
       console.error('❌ Faltan campos requeridos: to y conversationId');
