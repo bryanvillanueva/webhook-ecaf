@@ -1041,33 +1041,50 @@ app.get('/api/download-document/:mediaId', async (req, res) => {
   }
 });
 
-// 📌 Endpoint para agendar citas en la base de datos
-app.post('/appointments', (req, res) => {
-    const { phone_number, name, email, city, description, preferred_date, preferred_time, mode } = req.body;
 
-    if (!phone_number || !name || !city || !description || !preferred_date || !preferred_time) {
-        return res.status(400).send('Todos los campos obligatorios deben completarse');
+// CERTIFICADOS //
+
+// Endpoint para crear un nuevo certificado
+
+app.post('/api/certificados', (req, res) => {
+  // Extraemos los datos enviados en el cuerpo de la solicitud
+  const { nombre, apellido, tipo_identificacion, numero_identificacion, tipo_certificado, telefono, correo } = req.body;
+
+  // Validamos que se hayan enviado todos los campos requeridos
+  if (!nombre || !apellido || !tipo_identificacion || !numero_identificacion || !tipo_certificado || !telefono || !correo) {
+    return res.status(400).json({ error: 'Todos los campos son obligatorios' });
+  }
+
+  // Preparamos la consulta SQL para insertar el registro.
+  // La columna "estado" se asigna por defecto a 'pendiente' y "created_at" se genera automáticamente.
+  const sql = `
+    INSERT INTO certificados 
+      (nombre, apellido, tipo_identificacion, numero_identificacion, tipo_certificado, telefono, correo)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `;
+
+  db.query(sql, [nombre, apellido, tipo_identificacion, numero_identificacion, tipo_certificado, telefono, correo], (err, result) => {
+    if (err) {
+      console.error('❌ Error al insertar certificado:', err.message);
+      return res.status(500).json({ error: 'Error al insertar certificado en la base de datos' });
     }
-
-    const validCities = ['Barranquilla', 'Melbourne'];
-    if (validCities.includes(city) && !['Presencial', 'Virtual'].includes(mode)) {
-        return res.status(400).send('Debe especificar si la cita será Presencial o Virtual para esta ciudad');
-    }
-
-    const sql = `
-        INSERT INTO appointments 
-        (phone_number, name, email, city, description, preferred_date, preferred_time, mode) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-
-    db.query(sql, [phone_number, name, email, city, description, preferred_date, preferred_time, mode], (err, result) => {
-        if (err) {
-            console.error('❌ Error al guardar la cita:', err.message);
-            return res.status(500).send('Error al guardar la cita');
-        }
-        res.status(201).send({ message: '✅ Cita creada con éxito', id: result.insertId });
-    });
+    res.status(201).json({ message: 'Certificado insertado exitosamente', id: result.insertId });
+  });
 });
+
+// Endpoint para obtener todos los certificados
+
+app.get('/api/certificados', (req, res) => {
+  const sql = `SELECT * FROM certificados ORDER BY created_at DESC`;
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error('❌ Error al obtener certificados:', err.message);
+      return res.status(500).json({ error: 'Error al obtener certificados de la base de datos' });
+    }
+    res.json(results);
+  });
+});
+
 
 // Manejo de SIGTERM para evitar cierre abrupto en Railway
 process.on("SIGTERM", () => {
