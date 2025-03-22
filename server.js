@@ -1075,7 +1075,7 @@ app.post('/api/certificados', (req, res) => {
 // Endpoint para obtener todos los certificados
 
 app.get('/api/certificados', (req, res) => {
-  const sql = `SELECT * FROM certificados ORDER BY created_at DESC`;
+  const sql = `SELECT * FROM certificados ORDER BY created_at ASC`;
   db.query(sql, (err, results) => {
     if (err) {
       console.error('❌ Error al obtener certificados:', err.message);
