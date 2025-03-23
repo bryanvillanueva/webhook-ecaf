@@ -1574,7 +1574,7 @@ function verifyWooCommerceWebhook(req, res, next) {
 
 // ENDPOINTS PARA WEBHOOKS Y API
 
-// Endpoint para recibir webhooks de WooCommerce (con verificación de firma)
+// Actualiza esta parte en el manejador del webhook para obtener mejor la referencia
 app.post('/api/webhooks/woocommerce/order-updated', verifyWooCommerceWebhook, async (req, res) => {
   try {
     console.log('📦 Webhook de WooCommerce recibido - actualización de orden');
@@ -1593,7 +1593,109 @@ app.post('/api/webhooks/woocommerce/order-updated', verifyWooCommerceWebhook, as
     
     console.log(`✅ Orden recibida: ID=${orderId}, Estado WC=${wcStatus}, Estado certificado=${estadoCertificado}`);
 
-    // Verificar si existe un certificado relacionado con esta orden
+    // Buscamos la referencia del certificado en diferentes lugares de la orden
+    let certificadoId = null;
+    
+    // 1. Buscar en la nota del cliente (customer_note)
+    const customerNote = order.customer_note || '';
+    let notesMatch = customerNote.match(/#(\d+)/) || customerNote.match(/certificado.?(\d+)/i) || customerNote.match(/referencia.?(\d+)/i);
+    if (notesMatch && notesMatch[1]) {
+      certificadoId = notesMatch[1];
+      console.log(`🔍 Referencia de certificado ${certificadoId} encontrada en nota del cliente`);
+    }
+    
+    // 2. Buscar en los metadatos de la orden
+    if (!certificadoId && order.meta_data && Array.isArray(order.meta_data)) {
+      for (const meta of order.meta_data) {
+        // Buscar en cualquier campo de metadatos que pueda contener la referencia
+        const metaValue = meta.value || '';
+        if (typeof metaValue === 'string') {
+          notesMatch = metaValue.match(/#(\d+)/) || metaValue.match(/certificado.?(\d+)/i) || metaValue.match(/referencia.?(\d+)/i);
+          if (notesMatch && notesMatch[1]) {
+            certificadoId = notesMatch[1];
+            console.log(`🔍 Referencia de certificado ${certificadoId} encontrada en meta_data: ${meta.key}`);
+            break;
+          }
+        }
+      }
+    }
+    
+    // 3. Buscar en los items de la orden (nombres de productos, notas de línea)
+    if (!certificadoId && order.line_items && Array.isArray(order.line_items)) {
+      for (const item of order.line_items) {
+        // Buscar en las notas del ítem si existen
+        if (item.meta_data && Array.isArray(item.meta_data)) {
+          for (const meta of item.meta_data) {
+            const metaValue = meta.value || '';
+            if (typeof metaValue === 'string') {
+              notesMatch = metaValue.match(/#(\d+)/) || metaValue.match(/certificado.?(\d+)/i) || metaValue.match(/referencia.?(\d+)/i);
+              if (notesMatch && notesMatch[1]) {
+                certificadoId = notesMatch[1];
+                console.log(`🔍 Referencia de certificado ${certificadoId} encontrada en line_item meta_data: ${meta.key}`);
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // 4. Revisar datos del cliente y dirección de facturación por si la referencia está ahí
+    if (!certificadoId) {
+      // Campos donde puede haber información del certificado
+      const billingFields = [
+        order.billing?.first_name, 
+        order.billing?.last_name, 
+        order.billing?.company, 
+        order.billing?.address_1, 
+        order.billing?.address_2, 
+        order.billing?.city, 
+        order.billing?.state, 
+        order.billing?.postcode,
+        order.billing?.country,
+        order.billing?.email,
+        order.billing?.phone
+      ];
+      
+      for (const field of billingFields) {
+        if (field && typeof field === 'string') {
+          notesMatch = field.match(/#(\d+)/) || field.match(/certificado.?(\d+)/i) || field.match(/referencia.?(\d+)/i);
+          if (notesMatch && notesMatch[1]) {
+            certificadoId = notesMatch[1];
+            console.log(`🔍 Referencia de certificado ${certificadoId} encontrada en datos de facturación`);
+            break;
+          }
+        }
+      }
+    }
+
+    // Si encontramos un ID de certificado, actualizar directamente
+    if (certificadoId) {
+      const directUpdateSql = `UPDATE certificados SET estado = ?, order_id = ? WHERE id = ?`;
+      
+      db.query(directUpdateSql, [estadoCertificado, orderId, certificadoId], (directErr, directResult) => {
+        if (directErr) {
+          console.error(`❌ Error al actualizar certificado ${certificadoId}:`, directErr.message);
+          // Continuar con búsqueda alternativa
+        } else if (directResult.affectedRows > 0) {
+          console.log(`✅ Certificado ID=${certificadoId} actualizado para orden ${orderId} (por referencia)`);
+          return res.status(200).json({ 
+            success: true,
+            message: `Certificado actualizado correctamente (por referencia)`,
+            certificadoId: certificadoId,
+            orden: orderId,
+            estado: estadoCertificado
+          });
+        } else {
+          console.log(`⚠️ No se encontró certificado con ID=${certificadoId} mencionado en la referencia`);
+          // Continuar con búsqueda alternativa
+        }
+      });
+    } else {
+      console.log(`ℹ️ No se encontró referencia de certificado en la orden ${orderId}`);
+    }
+
+    // Verificar si existe un certificado relacionado con esta orden (caso de actualización)
     const checkOrderSql = `SELECT * FROM certificados WHERE order_id = ?`;
     
     db.query(checkOrderSql, [orderId], (err, results) => {
@@ -1622,48 +1724,12 @@ app.post('/api/webhooks/woocommerce/order-updated', verifyWooCommerceWebhook, as
         });
       } else {
         // No hay certificado vinculado, buscar coincidencias por email o teléfono
-        // Si tenemos datos de facturación, intentamos buscar coincidencias
         // Comprobar si hemos recibido datos de billing o customer en la orden
         const email = order.billing?.email || order.customer?.email;
         const telefono = order.billing?.phone || order.customer?.phone;
         
-        // Si hay notas del cliente, revisar si contiene una referencia a un ID de certificado
-        const notasCliente = order.customer_note || '';
-        let certificadoIdFromNotes = null;
-        
-        // Buscar una referencia como "#123" o "certificado 123" o similar
-        const notesMatch = notasCliente.match(/#(\d+)/) || notasCliente.match(/certificado.?(\d+)/i);
-        if (notesMatch && notesMatch[1]) {
-          certificadoIdFromNotes = notesMatch[1];
-          console.log(`🔍 Detectada referencia de certificado ${certificadoIdFromNotes} en las notas`);
-        }
-        
-        if (certificadoIdFromNotes) {
-          // Si se encontró un ID en las notas, intentar actualizar ese certificado directamente
-          const directUpdateSql = `UPDATE certificados SET estado = ?, order_id = ? WHERE id = ?`;
-          
-          db.query(directUpdateSql, [estadoCertificado, orderId, certificadoIdFromNotes], (directErr, directResult) => {
-            if (directErr) {
-              console.error(`❌ Error al actualizar certificado ${certificadoIdFromNotes}:`, directErr.message);
-              // Seguir con la búsqueda por email/teléfono como respaldo
-            } else if (directResult.affectedRows > 0) {
-              console.log(`✅ Certificado ID=${certificadoIdFromNotes} actualizado para orden ${orderId} (desde notas)`);
-              return res.status(200).json({ 
-                success: true,
-                message: `Certificado actualizado correctamente (encontrado en notas)`,
-                certificadoId: certificadoIdFromNotes,
-                orden: orderId,
-                estado: estadoCertificado
-              });
-            } else {
-              console.log(`⚠️ No se encontró certificado con ID=${certificadoIdFromNotes} mencionado en las notas`);
-              // Seguir con la búsqueda por email/teléfono como respaldo
-            }
-          });
-        }
-        
         // Si no hay email o teléfono, no podemos buscar coincidencias
-        if (!email && !telefono && !certificadoIdFromNotes) {
+        if (!email && !telefono) {
           console.log(`ℹ️ La orden ${orderId} no tiene datos de contacto para vincular un certificado`);
           return res.status(404).json({ 
             error: 'No se encontró información para vincular el certificado',
@@ -1731,6 +1797,92 @@ app.post('/api/webhooks/woocommerce/order-updated', verifyWooCommerceWebhook, as
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
+
+// Endpoint para obtener detalles completos de una orden de WooCommerce
+app.get('/api/woocommerce/order/:orderId', async (req, res) => {
+  const { orderId } = req.params;
+  
+  if (!orderId) {
+    return res.status(400).json({ error: 'Se requiere ID de orden' });
+  }
+  
+  try {
+    // Obtener detalles de la orden desde WooCommerce
+    const orderData = await getOrderDetails(orderId);
+    
+    // Buscar si hay certificados asociados a esta orden
+    const certificadosSql = `SELECT * FROM certificados WHERE order_id = ?`;
+    
+    db.query(certificadosSql, [orderId], (err, certificados) => {
+      if (err) {
+        console.error('❌ Error al buscar certificados asociados:', err.message);
+        // Continuar con la respuesta aunque haya error en esta parte
+      }
+      
+      // Devolver la información combinada
+      res.status(200).json({
+        success: true,
+        orden: orderData,
+        certificados: err ? [] : certificados,
+        // Indicar si se detecta alguna referencia a certificados en la orden
+        referencias_detectadas: detectarReferencias(orderData)
+      });
+    });
+  } catch (error) {
+    console.error(`❌ Error al obtener detalles de la orden ${orderId}:`, error.message);
+    
+    if (error.response && error.response.status === 404) {
+      return res.status(404).json({ error: `La orden ${orderId} no existe en WooCommerce` });
+    }
+    
+    res.status(500).json({ error: 'Error al obtener detalles de la orden' });
+  }
+});
+
+// Función auxiliar para detectar referencias a certificados en una orden
+function detectarReferencias(orden) {
+  const referencias = [];
+  
+  // Función recursiva para buscar en objetos anidados
+  function buscarReferencias(obj, ruta = '') {
+    if (!obj || typeof obj !== 'object') return;
+    
+    // Si es un array, buscar en cada elemento
+    if (Array.isArray(obj)) {
+      obj.forEach((item, index) => {
+        buscarReferencias(item, `${ruta}[${index}]`);
+      });
+      return;
+    }
+    
+    // Buscar en cada propiedad del objeto
+    for (const [key, value] of Object.entries(obj)) {
+      const rutaActual = ruta ? `${ruta}.${key}` : key;
+      
+      // Si es una cadena, buscar referencias
+      if (typeof value === 'string') {
+        const matches = value.match(/#(\d+)/) || 
+                       value.match(/certificado.?(\d+)/i) || 
+                       value.match(/referencia.?(\d+)/i);
+        
+        if (matches && matches[1]) {
+          referencias.push({
+            id: matches[1],
+            ruta: rutaActual,
+            texto: value
+          });
+        }
+      } 
+      // Si es un objeto o array, seguir buscando recursivamente
+      else if (value && typeof value === 'object') {
+        buscarReferencias(value, rutaActual);
+      }
+    }
+  }
+  
+  buscarReferencias(orden);
+  return referencias;
+}
 
 
 // Endpoint de prueba para simular un webhook (útil durante desarrollo)
