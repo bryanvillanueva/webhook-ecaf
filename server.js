@@ -7,6 +7,7 @@ const mysql = require('mysql2'); // Para conectarse a la base de datos
 const FormData = require('form-data'); // Add this import at the top of your file
 const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const bcrypt = require('bcrypt');
 
 
 const app = express();
@@ -1121,45 +1122,95 @@ app.get('/api/certificados', (req, res) => {
 // Endpoint para autenticación (inicio de sesión) usando username/email y contraseña
 app.post('/api/login', (req, res) => {
   const { username, email, password } = req.body;
+  
+  // Logs para depuración (ocultar la contraseña en los logs)
+  console.log('🔐 Solicitud de login recibida:', {
+    username: username || 'no proporcionado',
+    email: email || 'no proporcionado',
+    passwordProvided: !!password
+  });
 
   // Validar que se haya proporcionado (username o email) y contraseña
   if ((!username && !email) || !password) {
+    console.log('❌ Faltan datos de login requeridos');
     return res.status(400).json({ error: 'Se requiere username o email y contraseña.' });
   }
 
   // Construir la consulta SQL según los datos enviados
+  // Nota: NO incluimos la verificación de contraseña en la consulta SQL
+  // Solo obtenemos el usuario y verificamos la contraseña con bcrypt después
   let sqlQuery = '';
   let params = [];
-
+  
   if (username && email) {
-    sqlQuery = 'SELECT * FROM mdl_user WHERE (username = ? OR email = ?) AND password = ? LIMIT 1';
-    params = [username, email, password];
+    sqlQuery = 'SELECT * FROM mdl_user WHERE (username = ? OR email = ?) LIMIT 1';
+    params = [username, email];
   } else if (username) {
-    sqlQuery = 'SELECT * FROM mdl_user WHERE username = ? AND password = ? LIMIT 1';
-    params = [username, password];
+    sqlQuery = 'SELECT * FROM mdl_user WHERE username = ? LIMIT 1';
+    params = [username];
   } else {
-    sqlQuery = 'SELECT * FROM mdl_user WHERE email = ? AND password = ? LIMIT 1';
-    params = [email, password];
+    sqlQuery = 'SELECT * FROM mdl_user WHERE email = ? LIMIT 1';
+    params = [email];
   }
 
-  authDB.query(sqlQuery, params, (err, results) => {
+  console.log('🔍 Buscando usuario en la base de datos...');
+  
+  authDB.query(sqlQuery, params, async (err, results) => {
     if (err) {
       console.error('❌ Error al consultar el usuario:', err.message);
       return res.status(500).json({ error: 'Error interno del servidor.' });
     }
 
     if (results.length === 0) {
+      console.log('⚠️ Usuario no encontrado');
       return res.status(401).json({ error: 'Credenciales inválidas.' });
     }
 
-    // Se encontró el usuario; removemos el campo password antes de retornar los datos
     const user = results[0];
-    delete user.password;
-
-    return res.json({ message: 'Inicio de sesión exitoso.', user });
+    console.log('✅ Usuario encontrado, verificando contraseña...');
+    
+    try {
+      // Verificación con bcrypt - esto maneja el salting automáticamente
+      // Si el hash está en formato bcrypt ($2y$, $2a$, etc.), esto funcionará
+      const match = await bcrypt.compare(password, user.password);
+      
+      if (match) {
+        console.log('✅ Contraseña correcta, login exitoso para:', user.username);
+        
+        // Crear copia del usuario sin la contraseña
+        const userResponse = { ...user };
+        delete userResponse.password;
+        
+        // Devolver respuesta exitosa
+        return res.json({ 
+          message: 'Inicio de sesión exitoso.', 
+          user: userResponse 
+        });
+      } else {
+        console.log('❌ Contraseña incorrecta para usuario:', user.username);
+        return res.status(401).json({ error: 'Credenciales inválidas.' });
+      }
+    } catch (error) {
+      console.error('❌ Error en verificación de contraseña:', error.message);
+      
+      // Si hay un error en bcrypt.compare, podría ser porque el hash no está en formato bcrypt
+      // Intenta comparación directa como fallback (útil si las contraseñas no usan bcrypt)
+      if (password === user.password) {
+        console.log('✅ Contraseña correcta (fallback), login exitoso para:', user.username);
+        
+        const userResponse = { ...user };
+        delete userResponse.password;
+        
+        return res.json({ 
+          message: 'Inicio de sesión exitoso.', 
+          user: userResponse 
+        });
+      }
+      
+      return res.status(401).json({ error: 'Credenciales inválidas.' });
+    }
   });
 });
-
 
 // Manejo de SIGTERM para evitar cierre abrupto en Railway
 process.on("SIGTERM", () => {
