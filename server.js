@@ -1474,13 +1474,6 @@ app.get('/api/moodle/my-role', (req, res) => {
   }
 });
 
-// Importar la configuración de la API de WooCommerce
-const { 
-  WooCommerceAPI, 
-  getOrderDetails, 
-  updateOrderStatus, 
-  checkOrderStatus 
-} = require('./ruta-a-tu-archivo/woocommerce-api-config'); // Ajusta la ruta
 
 // Función para mapear estados de WooCommerce a estados de certificados
 function mapWooCommerceStatusToCertificado(wcStatus) {
@@ -1525,13 +1518,30 @@ function mapCertificadoStatusToWooCommerce(certStatus) {
 // Middleware para verificar la firma del webhook de WooCommerce
 function verifyWooCommerceWebhook(req, res, next) {
   // La clave secreta debe coincidir con la configurada en WooCommerce
-  const WEBHOOK_SECRET = 'tu_secreto_del_webhook'; // Reemplaza con tu secreto
+  // Puedes definirla como variable de entorno o directamente aquí
+  const WEBHOOK_SECRET = 'cs_8be4ab41220cdedff1b2ee361fc755f8d53a85ba'; // Usa el mismo consumer secret
 
+  // En desarrollo, puedes omitir la verificación si es necesario
+  const SKIP_VERIFICATION = process.env.NODE_ENV === 'development';
+  
+  if (SKIP_VERIFICATION) {
+    console.log('⚠️ Omitiendo verificación de webhook (modo desarrollo)');
+    return next();
+  }
+  
   try {
     // WooCommerce envía la firma en el encabezado x-wc-webhook-signature
     const signature = req.headers['x-wc-webhook-signature'];
     
+    // Si no hay firma, verificamos si es una prueba manual
     if (!signature) {
+      // Para pruebas manuales, puedes permitir solicitudes sin firma
+      // si incluyen un parámetro de prueba
+      if (req.query.test === 'true' && process.env.NODE_ENV === 'development') {
+        console.log('⚠️ Permitiendo solicitud de prueba sin firma');
+        return next();
+      }
+      
       console.error('❌ Falta la firma del webhook');
       return res.status(401).json({ error: 'Firma no proporcionada' });
     }
@@ -1539,14 +1549,22 @@ function verifyWooCommerceWebhook(req, res, next) {
     // Cálculo de la firma utilizando crypto
     const crypto = require('crypto');
     const hmac = crypto.createHmac('sha256', WEBHOOK_SECRET);
-    hmac.update(JSON.stringify(req.body));
+    
+    // Usar el cuerpo sin procesar para la verificación
+    const rawBody = JSON.stringify(req.body);
+    hmac.update(rawBody);
     const calculatedSignature = hmac.digest('base64');
+
+    console.log('🔐 Verificando firma del webhook');
+    console.log(`Firma recibida: ${signature}`);
+    console.log(`Firma calculada: ${calculatedSignature}`);
 
     if (signature !== calculatedSignature) {
       console.error('❌ Firma del webhook inválida');
       return res.status(401).json({ error: 'Firma inválida' });
     }
 
+    console.log('✅ Firma de webhook verificada correctamente');
     next(); // Continuar con el manejo del webhook si la firma es válida
   } catch (error) {
     console.error('❌ Error al verificar la firma del webhook:', error);
@@ -1556,10 +1574,11 @@ function verifyWooCommerceWebhook(req, res, next) {
 
 // ENDPOINTS PARA WEBHOOKS Y API
 
-// 1. Endpoint para recibir webhooks de WooCommerce (con verificación de firma)
+// Endpoint para recibir webhooks de WooCommerce (con verificación de firma)
 app.post('/api/webhooks/woocommerce/order-updated', verifyWooCommerceWebhook, async (req, res) => {
   try {
     console.log('📦 Webhook de WooCommerce recibido - actualización de orden');
+    console.log('Cuerpo de la solicitud:', JSON.stringify(req.body, null, 2));
     
     const order = req.body;
     
@@ -1604,72 +1623,160 @@ app.post('/api/webhooks/woocommerce/order-updated', verifyWooCommerceWebhook, as
       } else {
         // No hay certificado vinculado, buscar coincidencias por email o teléfono
         // Si tenemos datos de facturación, intentamos buscar coincidencias
-        if (order.billing && (order.billing.email || order.billing.phone)) {
-          const email = order.billing.email;
-          const telefono = order.billing.phone;
+        // Comprobar si hemos recibido datos de billing o customer en la orden
+        const email = order.billing?.email || order.customer?.email;
+        const telefono = order.billing?.phone || order.customer?.phone;
+        
+        // Si hay notas del cliente, revisar si contiene una referencia a un ID de certificado
+        const notasCliente = order.customer_note || '';
+        let certificadoIdFromNotes = null;
+        
+        // Buscar una referencia como "#123" o "certificado 123" o similar
+        const notesMatch = notasCliente.match(/#(\d+)/) || notasCliente.match(/certificado.?(\d+)/i);
+        if (notesMatch && notesMatch[1]) {
+          certificadoIdFromNotes = notesMatch[1];
+          console.log(`🔍 Detectada referencia de certificado ${certificadoIdFromNotes} en las notas`);
+        }
+        
+        if (certificadoIdFromNotes) {
+          // Si se encontró un ID en las notas, intentar actualizar ese certificado directamente
+          const directUpdateSql = `UPDATE certificados SET estado = ?, order_id = ? WHERE id = ?`;
           
-          let findSql = `SELECT * FROM certificados WHERE `;
-          let params = [];
-          
-          if (email && telefono) {
-            findSql += `(correo = ? OR telefono = ?) `;
-            params = [email, telefono];
-          } else if (email) {
-            findSql += `correo = ? `;
-            params = [email];
-          } else {
-            findSql += `telefono = ? `;
-            params = [telefono];
-          }
-          
-          // Priorizar certificados pendientes o recientes sin order_id
-          findSql += `AND (order_id IS NULL OR order_id = '') ORDER BY created_at DESC LIMIT 1`;
-          
-          db.query(findSql, params, (findErr, findResults) => {
-            if (findErr) {
-              console.error('❌ Error al buscar certificado:', findErr.message);
-              return res.status(500).json({ error: 'Error al buscar certificado' });
-            }
-            
-            if (findResults.length === 0) {
-              console.log(`ℹ️ No se encontró certificado relacionado para la orden ${orderId}`);
-              return res.status(404).json({ error: 'No se encontró certificado relacionado' });
-            }
-            
-            const certificadoId = findResults[0].id;
-            
-            // Actualizar certificado y relacionarlo con la orden
-            const linkSql = `UPDATE certificados SET estado = ?, order_id = ? WHERE id = ?`;
-            
-            db.query(linkSql, [estadoCertificado, orderId, certificadoId], (linkErr, linkResult) => {
-              if (linkErr) {
-                console.error('❌ Error al vincular certificado con orden:', linkErr.message);
-                return res.status(500).json({ error: 'Error al vincular certificado con orden' });
-              }
-              
-              console.log(`✅ Certificado ID=${certificadoId} vinculado y actualizado para orden ${orderId}`);
+          db.query(directUpdateSql, [estadoCertificado, orderId, certificadoIdFromNotes], (directErr, directResult) => {
+            if (directErr) {
+              console.error(`❌ Error al actualizar certificado ${certificadoIdFromNotes}:`, directErr.message);
+              // Seguir con la búsqueda por email/teléfono como respaldo
+            } else if (directResult.affectedRows > 0) {
+              console.log(`✅ Certificado ID=${certificadoIdFromNotes} actualizado para orden ${orderId} (desde notas)`);
               return res.status(200).json({ 
                 success: true,
-                message: `Certificado vinculado y actualizado correctamente`,
-                certificadoId: certificadoId,
+                message: `Certificado actualizado correctamente (encontrado en notas)`,
+                certificadoId: certificadoIdFromNotes,
                 orden: orderId,
                 estado: estadoCertificado
               });
-            });
+            } else {
+              console.log(`⚠️ No se encontró certificado con ID=${certificadoIdFromNotes} mencionado en las notas`);
+              // Seguir con la búsqueda por email/teléfono como respaldo
+            }
           });
-        } else {
-          console.log(`ℹ️ La orden ${orderId} no tiene datos de facturación completos`);
+        }
+        
+        // Si no hay email o teléfono, no podemos buscar coincidencias
+        if (!email && !telefono && !certificadoIdFromNotes) {
+          console.log(`ℹ️ La orden ${orderId} no tiene datos de contacto para vincular un certificado`);
           return res.status(404).json({ 
             error: 'No se encontró información para vincular el certificado',
             message: 'La orden no tiene información de contacto completa'
           });
         }
+        
+        // Búsqueda por email o teléfono
+        let findSql = `SELECT * FROM certificados WHERE `;
+        let params = [];
+        
+        if (email && telefono) {
+          findSql += `(correo = ? OR telefono = ?) `;
+          params = [email, telefono];
+        } else if (email) {
+          findSql += `correo = ? `;
+          params = [email];
+        } else if (telefono) {
+          findSql += `telefono = ? `;
+          params = [telefono];
+        } else {
+          // Sin datos para buscar, pero esto no debería ocurrir debido a la validación anterior
+          return res.status(404).json({ error: 'Datos insuficientes para buscar certificado' });
+        }
+        
+        // Priorizar certificados pendientes o recientes sin order_id asignado
+        findSql += `AND (order_id IS NULL OR order_id = '') ORDER BY created_at DESC LIMIT 1`;
+        
+        db.query(findSql, params, (findErr, findResults) => {
+          if (findErr) {
+            console.error('❌ Error al buscar certificado:', findErr.message);
+            return res.status(500).json({ error: 'Error al buscar certificado' });
+          }
+          
+          if (findResults.length === 0) {
+            console.log(`ℹ️ No se encontró certificado relacionado para la orden ${orderId}`);
+            return res.status(404).json({ error: 'No se encontró certificado relacionado' });
+          }
+          
+          const certificadoId = findResults[0].id;
+          
+          // Actualizar certificado y relacionarlo con la orden
+          const linkSql = `UPDATE certificados SET estado = ?, order_id = ? WHERE id = ?`;
+          
+          db.query(linkSql, [estadoCertificado, orderId, certificadoId], (linkErr, linkResult) => {
+            if (linkErr) {
+              console.error('❌ Error al vincular certificado con orden:', linkErr.message);
+              return res.status(500).json({ error: 'Error al vincular certificado con orden' });
+            }
+            
+            console.log(`✅ Certificado ID=${certificadoId} vinculado y actualizado para orden ${orderId}`);
+            return res.status(200).json({ 
+              success: true,
+              message: `Certificado vinculado y actualizado correctamente`,
+              certificadoId: certificadoId,
+              orden: orderId,
+              estado: estadoCertificado
+            });
+          });
+        });
       }
     });
   } catch (error) {
     console.error('❌ Error en el webhook:', error.message);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
+});
+
+
+// Endpoint de prueba para simular un webhook (útil durante desarrollo)
+app.post('/api/test-webhook', async (req, res) => {
+  if (process.env.NODE_ENV !== 'development') {
+    return res.status(403).json({ error: 'Este endpoint solo está disponible en entorno de desarrollo' });
+  }
+  
+  try {
+    console.log('🧪 Simulando webhook de WooCommerce para pruebas');
+    
+    const testOrderData = req.body.order || {
+      id: req.body.orderId || 9999,
+      status: req.body.status || 'completed',
+      billing: {
+        email: req.body.email || 'test@ejemplo.com',
+        phone: req.body.phone || '3001234567'
+      },
+      customer_note: req.body.note || ''
+    };
+    
+    console.log('📦 Simulando datos de orden:', JSON.stringify(testOrderData, null, 2));
+    
+    // Crear una nueva solicitud al endpoint real
+    const webhookResponse = await axios.post(
+      `http://localhost:${PORT}/api/webhooks/woocommerce/order-updated?test=true`,
+      testOrderData
+    );
+    
+    console.log('✅ Respuesta de la simulación:', webhookResponse.data);
+    res.status(200).json({
+      success: true,
+      message: 'Simulación de webhook ejecutada correctamente',
+      originalRequest: testOrderData,
+      webhookResponse: webhookResponse.data
+    });
+  } catch (error) {
+    console.error('❌ Error en la simulación del webhook:', error.message);
+    res.status(500).json({ error: 'Error en la simulación del webhook', details: error.message });
+  }
+});
+
+// Endpoint para verificación del webhook (configuración inicial en WooCommerce)
+app.get('/api/webhooks/woocommerce', (req, res) => {
+  console.log('✅ Verificación del webhook WooCommerce recibida');
+  res.status(200).send('Webhook de WooCommerce configurado correctamente');
 });
 
 // 2. Endpoint para vincular manualmente un certificado con una orden de WooCommerce
