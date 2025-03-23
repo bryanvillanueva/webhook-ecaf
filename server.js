@@ -1116,6 +1116,51 @@ app.get('/api/certificados', (req, res) => {
 });
 
 
+// LOGIN // 
+
+// Endpoint para autenticación (inicio de sesión) usando username/email y contraseña
+app.post('/api/login', (req, res) => {
+  const { username, email, password } = req.body;
+
+  // Validar que se haya proporcionado (username o email) y contraseña
+  if ((!username && !email) || !password) {
+    return res.status(400).json({ error: 'Se requiere username o email y contraseña.' });
+  }
+
+  // Construir la consulta SQL según los datos enviados
+  let sqlQuery = '';
+  let params = [];
+
+  if (username && email) {
+    sqlQuery = 'SELECT * FROM mdl_user WHERE (username = ? OR email = ?) AND password = ? LIMIT 1';
+    params = [username, email, password];
+  } else if (username) {
+    sqlQuery = 'SELECT * FROM mdl_user WHERE username = ? AND password = ? LIMIT 1';
+    params = [username, password];
+  } else {
+    sqlQuery = 'SELECT * FROM mdl_user WHERE email = ? AND password = ? LIMIT 1';
+    params = [email, password];
+  }
+
+  authDB.query(sqlQuery, params, (err, results) => {
+    if (err) {
+      console.error('❌ Error al consultar el usuario:', err.message);
+      return res.status(500).json({ error: 'Error interno del servidor.' });
+    }
+
+    if (results.length === 0) {
+      return res.status(401).json({ error: 'Credenciales inválidas.' });
+    }
+
+    // Se encontró el usuario; removemos el campo password antes de retornar los datos
+    const user = results[0];
+    delete user.password;
+
+    return res.json({ message: 'Inicio de sesión exitoso.', user });
+  });
+});
+
+
 // Manejo de SIGTERM para evitar cierre abrupto en Railway
 process.on("SIGTERM", () => {
     console.log("🔻 Señal SIGTERM recibida. Cerrando servidor...");
