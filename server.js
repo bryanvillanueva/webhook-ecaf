@@ -75,6 +75,72 @@ cloudinary.config({
   api_secret: process.env.API_SECRET
 }) 
 
+// WOOCOMMERCE
+// Configuración para la API de WooCommerce
+const WooCommerceRestApi = require('@woocommerce/woocommerce-rest-api').default;
+
+// Crear una instancia de la API de WooCommerce
+const WooCommerceAPI = new WooCommerceRestApi({
+  url: 'http://certificados.ecafescuela.com', // URL de tu tienda (reemplazar)
+  consumerKey: 'ck_ab4d2b69790a1c3adfa9fc33f2d82f5a47e4dbde', // Tu Consumer Key de WooCommerce
+  consumerSecret: 'cs_8be4ab41220cdedff1b2ee361fc755f8d53a85ba', // Tu Consumer Secret de WooCommerce
+  version: 'wc/v3', // Versión de la API
+  queryStringAuth: true
+});
+
+// Función para obtener detalles de una orden por ID
+async function getOrderDetails(orderId) {
+  try {
+    const response = await WooCommerceAPI.get(`orders/${orderId}`);
+    return response.data;
+  } catch (error) {
+    console.error(`❌ Error al obtener detalles de la orden ${orderId}:`, error.message);
+    throw error;
+  }
+}
+
+// Función para actualizar el estado de una orden
+async function updateOrderStatus(orderId, status, note = '') {
+  try {
+    const response = await WooCommerceAPI.put(`orders/${orderId}`, {
+      status: status,
+      customer_note: note ? note : undefined
+    });
+    return response.data;
+  } catch (error) {
+    console.error(`❌ Error al actualizar estado de la orden ${orderId}:`, error.message);
+    throw error;
+  }
+}
+
+// Función para verificar si una orden existe y obtener su estado actual
+async function checkOrderStatus(orderId) {
+  try {
+    const order = await getOrderDetails(orderId);
+    return {
+      exists: true,
+      status: order.status,
+      orderData: order
+    };
+  } catch (error) {
+    if (error.response && error.response.status === 404) {
+      return {
+        exists: false,
+        status: null,
+        orderData: null
+      };
+    }
+    throw error;
+  }
+}
+
+// Exportar las funciones y el cliente API para usarlos en los endpoints
+module.exports = {
+  WooCommerceAPI,
+  getOrderDetails,
+  updateOrderStatus,
+  checkOrderStatus
+};
 
 
 
@@ -1407,6 +1473,414 @@ app.get('/api/moodle/my-role', (req, res) => {
     });
   }
 });
+
+// Importar la configuración de la API de WooCommerce
+const { 
+  WooCommerceAPI, 
+  getOrderDetails, 
+  updateOrderStatus, 
+  checkOrderStatus 
+} = require('./ruta-a-tu-archivo/woocommerce-api-config'); // Ajusta la ruta
+
+// Función para mapear estados de WooCommerce a estados de certificados
+function mapWooCommerceStatusToCertificado(wcStatus) {
+  switch (wcStatus) {
+    case 'pending':
+      return 'pendiente';
+    case 'processing':
+      return 'procesando';
+    case 'on-hold':
+      return 'pendiente';
+    case 'completed':
+      return 'pagado';
+    case 'cancelled':
+      return 'rechazado';
+    case 'refunded':
+      return 'rechazado';
+    case 'failed':
+      return 'error';
+    default:
+      return 'pendiente';
+  }
+}
+
+// Función para mapear estados de certificados a estados de WooCommerce
+function mapCertificadoStatusToWooCommerce(certStatus) {
+  switch (certStatus) {
+    case 'pendiente':
+      return 'pending';
+    case 'procesando':
+      return 'processing';
+    case 'pagado':
+      return 'completed';
+    case 'error':
+      return 'failed';
+    case 'rechazado':
+      return 'cancelled';
+    default:
+      return 'pending';
+  }
+}
+
+// Middleware para verificar la firma del webhook de WooCommerce
+function verifyWooCommerceWebhook(req, res, next) {
+  // La clave secreta debe coincidir con la configurada en WooCommerce
+  const WEBHOOK_SECRET = 'tu_secreto_del_webhook'; // Reemplaza con tu secreto
+
+  try {
+    // WooCommerce envía la firma en el encabezado x-wc-webhook-signature
+    const signature = req.headers['x-wc-webhook-signature'];
+    
+    if (!signature) {
+      console.error('❌ Falta la firma del webhook');
+      return res.status(401).json({ error: 'Firma no proporcionada' });
+    }
+
+    // Cálculo de la firma utilizando crypto
+    const crypto = require('crypto');
+    const hmac = crypto.createHmac('sha256', WEBHOOK_SECRET);
+    hmac.update(JSON.stringify(req.body));
+    const calculatedSignature = hmac.digest('base64');
+
+    if (signature !== calculatedSignature) {
+      console.error('❌ Firma del webhook inválida');
+      return res.status(401).json({ error: 'Firma inválida' });
+    }
+
+    next(); // Continuar con el manejo del webhook si la firma es válida
+  } catch (error) {
+    console.error('❌ Error al verificar la firma del webhook:', error);
+    res.status(500).json({ error: 'Error al verificar la firma' });
+  }
+}
+
+// ENDPOINTS PARA WEBHOOKS Y API
+
+// 1. Endpoint para recibir webhooks de WooCommerce (con verificación de firma)
+app.post('/api/webhooks/woocommerce/order-updated', verifyWooCommerceWebhook, async (req, res) => {
+  try {
+    console.log('📦 Webhook de WooCommerce recibido - actualización de orden');
+    
+    const order = req.body;
+    
+    if (!order || !order.id || !order.status) {
+      console.error('❌ Datos de orden incompletos o inválidos');
+      return res.status(400).json({ error: 'Datos de orden incompletos' });
+    }
+    
+    const orderId = order.id;
+    const wcStatus = order.status;
+    const estadoCertificado = mapWooCommerceStatusToCertificado(wcStatus);
+    
+    console.log(`✅ Orden recibida: ID=${orderId}, Estado WC=${wcStatus}, Estado certificado=${estadoCertificado}`);
+
+    // Verificar si existe un certificado relacionado con esta orden
+    const checkOrderSql = `SELECT * FROM certificados WHERE order_id = ?`;
+    
+    db.query(checkOrderSql, [orderId], (err, results) => {
+      if (err) {
+        console.error('❌ Error al verificar certificado:', err.message);
+        return res.status(500).json({ error: 'Error al verificar certificado' });
+      }
+      
+      if (results.length > 0) {
+        // Ya existe relación directa, actualizamos el estado
+        const updateSql = `UPDATE certificados SET estado = ? WHERE order_id = ?`;
+        
+        db.query(updateSql, [estadoCertificado, orderId], (updateErr, updateResult) => {
+          if (updateErr) {
+            console.error('❌ Error al actualizar certificado:', updateErr.message);
+            return res.status(500).json({ error: 'Error al actualizar certificado' });
+          }
+          
+          console.log(`✅ Certificado actualizado para orden ${orderId}, nuevo estado: ${estadoCertificado}`);
+          return res.status(200).json({ 
+            success: true,
+            message: `Certificado actualizado correctamente`,
+            orden: orderId,
+            estado: estadoCertificado
+          });
+        });
+      } else {
+        // No hay certificado vinculado, buscar coincidencias por email o teléfono
+        // Si tenemos datos de facturación, intentamos buscar coincidencias
+        if (order.billing && (order.billing.email || order.billing.phone)) {
+          const email = order.billing.email;
+          const telefono = order.billing.phone;
+          
+          let findSql = `SELECT * FROM certificados WHERE `;
+          let params = [];
+          
+          if (email && telefono) {
+            findSql += `(correo = ? OR telefono = ?) `;
+            params = [email, telefono];
+          } else if (email) {
+            findSql += `correo = ? `;
+            params = [email];
+          } else {
+            findSql += `telefono = ? `;
+            params = [telefono];
+          }
+          
+          // Priorizar certificados pendientes o recientes sin order_id
+          findSql += `AND (order_id IS NULL OR order_id = '') ORDER BY created_at DESC LIMIT 1`;
+          
+          db.query(findSql, params, (findErr, findResults) => {
+            if (findErr) {
+              console.error('❌ Error al buscar certificado:', findErr.message);
+              return res.status(500).json({ error: 'Error al buscar certificado' });
+            }
+            
+            if (findResults.length === 0) {
+              console.log(`ℹ️ No se encontró certificado relacionado para la orden ${orderId}`);
+              return res.status(404).json({ error: 'No se encontró certificado relacionado' });
+            }
+            
+            const certificadoId = findResults[0].id;
+            
+            // Actualizar certificado y relacionarlo con la orden
+            const linkSql = `UPDATE certificados SET estado = ?, order_id = ? WHERE id = ?`;
+            
+            db.query(linkSql, [estadoCertificado, orderId, certificadoId], (linkErr, linkResult) => {
+              if (linkErr) {
+                console.error('❌ Error al vincular certificado con orden:', linkErr.message);
+                return res.status(500).json({ error: 'Error al vincular certificado con orden' });
+              }
+              
+              console.log(`✅ Certificado ID=${certificadoId} vinculado y actualizado para orden ${orderId}`);
+              return res.status(200).json({ 
+                success: true,
+                message: `Certificado vinculado y actualizado correctamente`,
+                certificadoId: certificadoId,
+                orden: orderId,
+                estado: estadoCertificado
+              });
+            });
+          });
+        } else {
+          console.log(`ℹ️ La orden ${orderId} no tiene datos de facturación completos`);
+          return res.status(404).json({ 
+            error: 'No se encontró información para vincular el certificado',
+            message: 'La orden no tiene información de contacto completa'
+          });
+        }
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error en el webhook:', error.message);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// 2. Endpoint para vincular manualmente un certificado con una orden de WooCommerce
+app.post('/api/certificados/:certificadoId/vincular-orden', async (req, res) => {
+  const { certificadoId } = req.params;
+  const { orderId } = req.body;
+  
+  if (!certificadoId || !orderId) {
+    return res.status(400).json({ error: 'Se requiere ID de certificado y orden' });
+  }
+  
+  try {
+    // Verificar si la orden existe en WooCommerce
+    const orderCheck = await checkOrderStatus(orderId);
+    
+    if (!orderCheck.exists) {
+      return res.status(404).json({ error: `La orden ${orderId} no existe en WooCommerce` });
+    }
+    
+    // Verificar si el certificado existe
+    const checkCertSql = `SELECT * FROM certificados WHERE id = ?`;
+    
+    db.query(checkCertSql, [certificadoId], async (err, results) => {
+      if (err) {
+        console.error('❌ Error al verificar certificado:', err.message);
+        return res.status(500).json({ error: 'Error al verificar certificado' });
+      }
+      
+      if (results.length === 0) {
+        return res.status(404).json({ error: `Certificado ${certificadoId} no encontrado` });
+      }
+      
+      // Verificar si el certificado ya está vinculado a otra orden
+      if (results[0].order_id && results[0].order_id !== orderId) {
+        return res.status(400).json({ 
+          error: `El certificado ya está vinculado a la orden ${results[0].order_id}` 
+        });
+      }
+      
+      // Mapear el estado de WooCommerce al estado del certificado
+      const estadoCertificado = mapWooCommerceStatusToCertificado(orderCheck.status);
+      
+      // Actualizar el certificado con el ID de orden y el estado
+      const updateSql = `UPDATE certificados SET order_id = ?, estado = ? WHERE id = ?`;
+      
+      db.query(updateSql, [orderId, estadoCertificado, certificadoId], (updateErr, updateResult) => {
+        if (updateErr) {
+          console.error('❌ Error al vincular certificado:', updateErr.message);
+          return res.status(500).json({ error: 'Error al vincular certificado' });
+        }
+        
+        console.log(`✅ Certificado ${certificadoId} vinculado a orden ${orderId}`);
+        return res.status(200).json({ 
+          success: true,
+          message: `Certificado vinculado correctamente`,
+          certificadoId: certificadoId,
+          orderId: orderId,
+          estado: estadoCertificado
+        });
+      });
+    });
+  } catch (error) {
+    console.error('❌ Error al vincular certificado con orden:', error.message);
+    res.status(500).json({ error: 'Error al vincular certificado con orden' });
+  }
+});
+
+// 3. Endpoint para sincronizar el estado de un certificado con su orden de WooCommerce
+app.post('/api/certificados/:certificadoId/sincronizar', async (req, res) => {
+  const { certificadoId } = req.params;
+  
+  if (!certificadoId) {
+    return res.status(400).json({ error: 'Se requiere ID de certificado' });
+  }
+  
+  try {
+    // Obtener información del certificado
+    const getCertSql = `SELECT * FROM certificados WHERE id = ?`;
+    
+    db.query(getCertSql, [certificadoId], async (err, results) => {
+      if (err) {
+        console.error('❌ Error al obtener certificado:', err.message);
+        return res.status(500).json({ error: 'Error al obtener certificado' });
+      }
+      
+      if (results.length === 0) {
+        return res.status(404).json({ error: `Certificado ${certificadoId} no encontrado` });
+      }
+      
+      const certificado = results[0];
+      
+      // Verificar si tiene order_id
+      if (!certificado.order_id) {
+        return res.status(400).json({ error: 'El certificado no está vinculado a una orden' });
+      }
+      
+      // Verificar si la orden existe en WooCommerce
+      const orderCheck = await checkOrderStatus(certificado.order_id);
+      
+      if (!orderCheck.exists) {
+        return res.status(404).json({ error: `La orden ${certificado.order_id} no existe en WooCommerce` });
+      }
+      
+      // Mapear el estado de WooCommerce al estado del certificado
+      const nuevoEstado = mapWooCommerceStatusToCertificado(orderCheck.status);
+      
+      // Actualizar el certificado con el nuevo estado
+      const updateSql = `UPDATE certificados SET estado = ? WHERE id = ?`;
+      
+      db.query(updateSql, [nuevoEstado, certificadoId], (updateErr, updateResult) => {
+        if (updateErr) {
+          console.error('❌ Error al actualizar certificado:', updateErr.message);
+          return res.status(500).json({ error: 'Error al actualizar certificado' });
+        }
+        
+        console.log(`✅ Certificado ${certificadoId} sincronizado con orden ${certificado.order_id}`);
+        return res.status(200).json({ 
+          success: true,
+          message: `Certificado sincronizado correctamente`,
+          certificadoId: certificadoId,
+          orderId: certificado.order_id,
+          estadoAnterior: certificado.estado,
+          estadoNuevo: nuevoEstado
+        });
+      });
+    });
+  } catch (error) {
+    console.error('❌ Error al sincronizar certificado:', error.message);
+    res.status(500).json({ error: 'Error al sincronizar certificado' });
+  }
+});
+
+// 4. Endpoint para actualizar el estado de una orden en WooCommerce desde un certificado
+app.post('/api/certificados/:certificadoId/actualizar-orden', async (req, res) => {
+  const { certificadoId } = req.params;
+  const { nuevoEstado, nota } = req.body;
+  
+  if (!certificadoId || !nuevoEstado) {
+    return res.status(400).json({ error: 'Se requiere ID de certificado y nuevo estado' });
+  }
+  
+  // Validar que el estado sea uno de los permitidos
+  const estadosValidos = ['pendiente', 'pagado', 'procesando', 'error', 'rechazado'];
+  if (!estadosValidos.includes(nuevoEstado)) {
+    return res.status(400).json({ error: 'Estado inválido', estadosValidos });
+  }
+  
+  try {
+    // Obtener información del certificado
+    const getCertSql = `SELECT * FROM certificados WHERE id = ?`;
+    
+    db.query(getCertSql, [certificadoId], async (err, results) => {
+      if (err) {
+        console.error('❌ Error al obtener certificado:', err.message);
+        return res.status(500).json({ error: 'Error al obtener certificado' });
+      }
+      
+      if (results.length === 0) {
+        return res.status(404).json({ error: `Certificado ${certificadoId} no encontrado` });
+      }
+      
+      const certificado = results[0];
+      
+      // Verificar si tiene order_id
+      if (!certificado.order_id) {
+        return res.status(400).json({ error: 'El certificado no está vinculado a una orden' });
+      }
+      
+      // Convertir el estado del certificado al equivalente en WooCommerce
+      const wcEstado = mapCertificadoStatusToWooCommerce(nuevoEstado);
+      
+      try {
+        // Actualizar el estado de la orden en WooCommerce
+        const updatedOrder = await updateOrderStatus(
+          certificado.order_id, 
+          wcEstado, 
+          nota || `Estado actualizado desde el sistema de certificados`
+        );
+        
+        // Actualizar el certificado en la base de datos
+        const updateSql = `UPDATE certificados SET estado = ? WHERE id = ?`;
+        
+        db.query(updateSql, [nuevoEstado, certificadoId], (updateErr, updateResult) => {
+          if (updateErr) {
+            console.error('❌ Error al actualizar certificado:', updateErr.message);
+            return res.status(500).json({ error: 'Error al actualizar certificado' });
+          }
+          
+          console.log(`✅ Orden ${certificado.order_id} y certificado ${certificadoId} actualizados a estado: ${nuevoEstado}`);
+          return res.status(200).json({ 
+            success: true,
+            message: `Orden y certificado actualizados correctamente`,
+            certificadoId: certificadoId,
+            orderId: certificado.order_id,
+            estadoAnterior: certificado.estado,
+            estadoNuevo: nuevoEstado,
+            orden: updatedOrder
+          });
+        });
+      } catch (apiError) {
+        console.error('❌ Error al actualizar orden en WooCommerce:', apiError.message);
+        return res.status(500).json({ error: 'Error al actualizar orden en WooCommerce' });
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error al actualizar orden desde certificado:', error.message);
+    res.status(500).json({ error: 'Error al actualizar orden desde certificado' });
+  }
+});
+
+// runMigration(); // Descomentar para ejecutar la migración cuando sea necesario
 
 // Manejo de SIGTERM para evitar cierre abrupto en Railway
 process.on("SIGTERM", () => {
