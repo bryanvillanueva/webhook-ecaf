@@ -1268,6 +1268,146 @@ app.post('/api/verify-token', (req, res) => {
   }
 });
 
+
+// Endpoint para verificar el rol de un usuario en Moodle
+app.get('/api/moodle/user-role/:username', (req, res) => {
+  const { username } = req.params;
+  
+  if (!username) {
+    return res.status(400).json({
+      success: false,
+      message: 'Se requiere un nombre de usuario'
+    });
+  }
+  
+  console.log(`🔍 Verificando rol para el usuario: ${username}`);
+  
+  const query = `
+    SELECT u.id, u.username, u.email, r.shortname AS role, r.id AS roleId
+    FROM mdl_user u
+    JOIN mdl_role_assignments ra ON u.id = ra.userid
+    JOIN mdl_role r ON ra.roleid = r.id
+    WHERE u.username = ?
+  `;
+  
+  // Usar la conexión a la base de datos de autenticación (authDB)
+  authDB.query(query, [username], (err, results) => {
+    if (err) {
+      console.error('❌ Error al consultar el rol del usuario:', err.message);
+      return res.status(500).json({
+        success: false,
+        message: 'Error al verificar el rol del usuario',
+        error: err.message
+      });
+    }
+    
+    if (results.length === 0) {
+      console.log(`⚠️ Usuario '${username}' no encontrado o sin roles asignados`);
+      return res.status(404).json({
+        success: false,
+        message: 'Usuario no encontrado o sin roles asignados'
+      });
+    }
+    
+    console.log(`✅ Roles encontrados para '${username}':`, results.map(r => r.role).join(', '));
+    
+    // Un usuario puede tener múltiples roles, así que enviamos todos
+    res.status(200).json({
+      success: true,
+      data: {
+        userId: results[0].id,
+        username: results[0].username,
+        email: results[0].email,
+        roles: results.map(row => ({
+          roleId: row.roleId,
+          roleName: row.role
+        }))
+      }
+    });
+  });
+});
+
+// Endpoint para verificar si un usuario es administrador
+app.get('/api/moodle/is-admin/:userId', (req, res) => {
+  const { userId } = req.params;
+  
+  if (!userId) {
+    return res.status(400).json({
+      success: false,
+      message: 'Se requiere un ID de usuario'
+    });
+  }
+  
+  console.log(`🔍 Verificando si el usuario con ID ${userId} es administrador`);
+  
+  const query = `
+    SELECT COUNT(*) AS isAdmin
+    FROM mdl_role_assignments ra
+    JOIN mdl_role r ON ra.roleid = r.id
+    WHERE ra.userid = ?
+    AND r.shortname IN ('admin', 'manager', 'administrator')
+  `;
+  
+  // Usar la conexión a la base de datos de autenticación (authDB)
+  authDB.query(query, [userId], (err, results) => {
+    if (err) {
+      console.error('❌ Error al verificar si el usuario es administrador:', err.message);
+      return res.status(500).json({
+        success: false,
+        message: 'Error al verificar el rol de administrador',
+        error: err.message
+      });
+    }
+    
+    const isAdmin = results[0].isAdmin > 0;
+    console.log(`✅ Usuario ${userId} es administrador: ${isAdmin ? 'Sí' : 'No'}`);
+    
+    res.status(200).json({
+      success: true,
+      isAdmin
+    });
+  });
+});
+
+// Endpoint para obtener el rol del usuario actualmente autenticado
+app.get('/api/moodle/my-role', (req, res) => {
+  // Obtener el username o userId del token de la sesión actual
+  // Esta implementación depende de cómo estés manejando la autenticación
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({
+      success: false,
+      message: 'No se proporcionó token de autenticación'
+    });
+  }
+  
+  try {
+    const token = authHeader.split(' ')[1];
+    // Asumiendo que tienes el username en el token (ajusta según tu implementación)
+    const tokenData = JSON.parse(Buffer.from(token, 'base64').toString());
+    
+    if (!tokenData.username) {
+      return res.status(401).json({
+        success: false,
+        message: 'Token inválido o expirado'
+      });
+    }
+    
+    // Redirigir al endpoint de verificación de rol con el username obtenido
+    req.params.username = tokenData.username;
+    return app.handle(req, res, req.url);
+    
+  } catch (error) {
+    console.error('❌ Error al decodificar el token:', error.message);
+    return res.status(401).json({
+      success: false,
+      message: 'Token inválido o expirado',
+      error: error.message
+    });
+  }
+});
+
 // Manejo de SIGTERM para evitar cierre abrupto en Railway
 process.on("SIGTERM", () => {
     console.log("🔻 Señal SIGTERM recibida. Cerrando servidor...");
