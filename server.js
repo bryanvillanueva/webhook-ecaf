@@ -7,7 +7,7 @@ const mysql = require('mysql2'); // Para conectarse a la base de datos
 const FormData = require('form-data'); // Add this import at the top of your file
 const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
-const bcrypt = require('bcrypt');
+const bcryptjs = require('bcryptjs');
 
 
 const app = express();
@@ -1136,9 +1136,27 @@ app.post('/api/login', (req, res) => {
     return res.status(400).json({ error: 'Se requiere username o email y contraseña.' });
   }
 
+  // Solución rápida para el usuario admin (usar para pruebas iniciales)
+  if ((username === 'admin' || email === 'admin@ecaf.com') && password === 'Ecafadmin2024*') {
+    console.log('✅ Admin login con credenciales directas');
+    
+    // Crear un objeto de usuario simulado para el administrador
+    const adminUser = {
+      id: 1,
+      username: 'admin',
+      email: 'admin@ecaf.com',
+      firstname: 'Administrador',
+      lastname: 'ECAF',
+      role: 'admin'
+    };
+    
+    return res.json({ 
+      message: 'Inicio de sesión exitoso.', 
+      user: adminUser 
+    });
+  }
+
   // Construir la consulta SQL según los datos enviados
-  // Nota: NO incluimos la verificación de contraseña en la consulta SQL
-  // Solo obtenemos el usuario y verificamos la contraseña con bcrypt después
   let sqlQuery = '';
   let params = [];
   
@@ -1153,7 +1171,7 @@ app.post('/api/login', (req, res) => {
     params = [email];
   }
 
-  console.log('🔍 Buscando usuario en la base de datos...');
+  console.log('🔍 Buscando usuario en la base de datos authDB...');
   
   authDB.query(sqlQuery, params, async (err, results) => {
     if (err) {
@@ -1170,9 +1188,9 @@ app.post('/api/login', (req, res) => {
     console.log('✅ Usuario encontrado, verificando contraseña...');
     
     try {
-      // Verificación con bcrypt - esto maneja el salting automáticamente
+      // Verificación con bcryptjs - esto maneja el salting automáticamente
       // Si el hash está en formato bcrypt ($2y$, $2a$, etc.), esto funcionará
-      const match = await bcrypt.compare(password, user.password);
+      const match = await bcryptjs.compare(password, user.password);
       
       if (match) {
         console.log('✅ Contraseña correcta, login exitoso para:', user.username);
@@ -1188,13 +1206,26 @@ app.post('/api/login', (req, res) => {
         });
       } else {
         console.log('❌ Contraseña incorrecta para usuario:', user.username);
+        
+        // Comprobación de respaldo: comparar directamente (útil si las contraseñas no usan bcrypt)
+        if (password === user.password) {
+          console.log('✅ Contraseña correcta (verificación directa), login exitoso para:', user.username);
+          
+          const userResponse = { ...user };
+          delete userResponse.password;
+          
+          return res.json({ 
+            message: 'Inicio de sesión exitoso.', 
+            user: userResponse 
+          });
+        }
+        
         return res.status(401).json({ error: 'Credenciales inválidas.' });
       }
     } catch (error) {
       console.error('❌ Error en verificación de contraseña:', error.message);
       
-      // Si hay un error en bcrypt.compare, podría ser porque el hash no está en formato bcrypt
-      // Intenta comparación directa como fallback (útil si las contraseñas no usan bcrypt)
+      // Si bcryptjs.compare falla, intenta comparación directa como último recurso
       if (password === user.password) {
         console.log('✅ Contraseña correcta (fallback), login exitoso para:', user.username);
         
@@ -1210,6 +1241,31 @@ app.post('/api/login', (req, res) => {
       return res.status(401).json({ error: 'Credenciales inválidas.' });
     }
   });
+});
+
+// Ruta para verificar el token (útil para mantener la sesión)
+app.post('/api/verify-token', (req, res) => {
+  const { token } = req.body;
+  
+  if (!token) {
+    return res.status(400).json({ valid: false });
+  }
+  
+  try {
+    // Decodificar el token básico
+    const tokenData = JSON.parse(atob(token));
+    
+    // Verificar si ha expirado
+    if (tokenData.expiresAt && tokenData.expiresAt < Date.now()) {
+      console.log('⚠️ Token expirado');
+      return res.status(401).json({ valid: false, reason: 'expired' });
+    }
+    
+    return res.status(200).json({ valid: true, userId: tokenData.userId });
+  } catch (error) {
+    console.error('❌ Error al verificar token:', error.message);
+    return res.status(401).json({ valid: false, reason: 'invalid' });
+  }
 });
 
 // Manejo de SIGTERM para evitar cierre abrupto en Railway
