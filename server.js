@@ -9,6 +9,26 @@ const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const bcryptjs = require('bcryptjs');
 
+// Importa Socket.IO y configura el servidor HTTP
+const http = require('http');
+const server = http.createServer(app);
+const { Server } = require('socket.io');
+const io = new Server(server, {
+  cors: {
+    origin: "*", // En producción, limita esto a tus dominios permitidos
+    methods: ["GET", "POST"]
+  }
+});
+
+// Configura Socket.IO para las conexiones
+io.on('connection', (socket) => {
+  console.log('🔌 Cliente conectado a Socket.IO:', socket.id);
+  
+  socket.on('disconnect', () => {
+    console.log('🔌 Cliente desconectado de Socket.IO:', socket.id);
+  });
+});
+
 
 const app = express();
 app.use(bodyParser.json());
@@ -1408,6 +1428,142 @@ app.get('/api/moodle/my-role', (req, res) => {
   }
 });
 
+
+// NOTIFICACIONES Y CAMBIOS DE ESTADOS EN LOS CERTIFICADOS //
+
+// Endpoint para obtener todas las notificaciones
+app.get('/api/certificados/notificaciones', (req, res) => {
+  const { limit = 50, offset = 0, unreadOnly = false } = req.query;
+  
+  let sql = `
+    SELECT n.*, c.nombre, c.apellido, c.tipo_certificado
+    FROM certificate_notifications n
+    JOIN certificados c ON n.certificate_id = c.id
+  `;
+  
+  if (unreadOnly === 'true') {
+    sql += ' WHERE n.read_status = FALSE';
+  }
+  
+  sql += ' ORDER BY n.created_at DESC LIMIT ? OFFSET ?';
+  
+  db.query(sql, [parseInt(limit), parseInt(offset)], (err, results) => {
+    if (err) {
+      console.error('❌ Error al obtener notificaciones:', err.message);
+      return res.status(500).json({ error: 'Error al obtener notificaciones' });
+    }
+    
+    res.json(results);
+  });
+});
+
+// Endpoint para marcar notificaciones como leídas
+app.put('/api/certificados/notificaciones/marcar-leidas', (req, res) => {
+  const { ids } = req.body;
+  
+  if (!ids || !Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: 'Se requiere un array de IDs' });
+  }
+  
+  const sql = 'UPDATE certificate_notifications SET read_status = TRUE WHERE id IN (?)';
+  
+  db.query(sql, [ids], (err, result) => {
+    if (err) {
+      console.error('❌ Error al marcar notificaciones como leídas:', err.message);
+      return res.status(500).json({ error: 'Error al actualizar notificaciones' });
+    }
+    
+    res.json({ 
+      message: 'Notificaciones marcadas como leídas', 
+      count: result.affectedRows 
+    });
+  });
+});
+
+// Endpoint para obtener el conteo de notificaciones no leídas
+app.get('/api/certificados/notificaciones/contador', (req, res) => {
+  const sql = 'SELECT COUNT(*) AS count FROM certificate_notifications WHERE read_status = FALSE';
+  
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error('❌ Error al obtener contador de notificaciones:', err.message);
+      return res.status(500).json({ error: 'Error al obtener contador' });
+    }
+    
+    res.json({ count: results[0].count });
+  });
+});
+
+// Sistema de polling para detectar nuevas notificaciones
+let lastNotificationId = 0; // Almacena el ID de la última notificación procesada
+
+// Función para inicializar el sistema de notificaciones
+async function initNotificationSystem() {
+  try {
+    // Obtener el ID de la última notificación actual
+    const [result] = await db.promise().query('SELECT MAX(id) as maxId FROM certificate_notifications');
+    lastNotificationId = result[0].maxId || 0;
+    
+    console.log(`✅ Sistema de notificaciones inicializado. Última notificación ID: ${lastNotificationId}`);
+    
+    // Iniciar el polling
+    startNotificationPolling();
+  } catch (error) {
+    console.error('❌ Error al inicializar sistema de notificaciones:', error.message);
+  }
+}
+
+// Función para verificar nuevas notificaciones periódicamente
+function startNotificationPolling() {
+  const POLLING_INTERVAL = 10000; // 10 segundos
+  
+  setInterval(async () => {
+    try {
+      // Consultar notificaciones más recientes que lastNotificationId
+      const query = `
+        SELECT n.*, c.nombre, c.apellido, c.tipo_certificado, c.tipo_identificacion, c.numero_identificacion
+        FROM certificate_notifications n
+        JOIN certificados c ON n.certificate_id = c.id
+        WHERE n.id > ?
+        ORDER BY n.id ASC
+      `;
+      
+      const [notifications] = await db.promise().query(query, [lastNotificationId]);
+      
+      if (notifications.length > 0) {
+        console.log(`🔔 Se encontraron ${notifications.length} nuevas notificaciones`);
+        
+        // Actualizar el último ID procesado
+        lastNotificationId = notifications[notifications.length - 1].id;
+        
+        // Emitir cada notificación a través de Socket.IO
+        notifications.forEach(notification => {
+          io.emit('certificateStatusChanged', {
+            id: notification.id,
+            certificate_id: notification.certificate_id,
+            oldStatus: notification.old_status,
+            newStatus: notification.new_status,
+            clientName: `${notification.nombre} ${notification.apellido}`,
+            documentType: notification.tipo_identificacion,
+            documentNumber: notification.numero_identificacion,
+            certificateType: notification.tipo_certificado,
+            timestamp: notification.created_at
+          });
+        });
+      }
+    } catch (error) {
+      console.error('❌ Error en el polling de notificaciones:', error.message);
+    }
+  }, POLLING_INTERVAL);
+}
+
+// Iniciar el sistema de notificaciones cuando arranca la aplicación
+initNotificationSystem();
+
+
+
+
+
 // Manejo de SIGTERM para evitar cierre abrupto en Railway
 process.on("SIGTERM", () => {
     console.log("🔻 Señal SIGTERM recibida. Cerrando servidor...");
@@ -1417,6 +1573,9 @@ process.on("SIGTERM", () => {
     });
 });
 
-// Iniciar el servidor
+// IMPORTANTE: Modificar la forma en que inicializas el servidor
+// Reemplaza esto:
+// app.listen(PORT, () => console.log(`🚀 Servidor corriendo en el puerto ${PORT}`));
+// Con esto:
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Servidor corriendo en el puerto ${PORT}`));
+server.listen(PORT, () => console.log(`🚀 Servidor corriendo en el puerto ${PORT} con Socket.IO`));
