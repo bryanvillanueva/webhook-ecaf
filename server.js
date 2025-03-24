@@ -259,8 +259,8 @@ app.post('/send-manual-message', async (req, res) => {
         INSERT INTO messages (conversation_id, sender, message, sent_at)
         VALUES (?, ?, ?, NOW())
       `;
-      // Use "Sharky" as default sender if not provided
-      db.query(sql, [conversationId, sender || 'Sharky', message], (err, result) => {
+      // Use "Ecaf" as default sender if not provided
+      db.query(sql, [conversationId, sender || 'Ecaf', message], (err, result) => {
         if (err) {
           console.error('❌ Error storing message in DB:', err.message);
           return res.status(500).json({ error: 'Error storing message in DB' });
@@ -571,11 +571,11 @@ app.delete('/api/delete-message/:messageId', (req, res) => {
 app.get('/api/dashboard-info', (req, res) => {
     // Total de mensajes en la tabla de mensajes
     const queryTotalMessages = 'SELECT COUNT(*) AS total_mensajes FROM messages';
-    // Mensajes enviados por Sharky
-    const queryMessagesSharky = 'SELECT COUNT(*) AS mensajes_sharky FROM messages WHERE sender = "Sharky"';
+    // Mensajes enviados por Ecaf
+    const queryMessagesEcaf = 'SELECT COUNT(*) AS mensajes_Ecaf FROM messages WHERE sender = "Ecaf"';
     // Total de usuarios (clientes únicos) en conversaciones
     const queryTotalUsers = 'SELECT COUNT(DISTINCT client_id) AS total_usuarios FROM conversations';
-    // Mensajes pendientes: conversaciones cuyo último mensaje no fue enviado por "Sharky"
+    // Mensajes pendientes: conversaciones cuyo último mensaje no fue enviado por "Ecaf"
     const queryPending = `
       SELECT COUNT(*) AS mensajes_pendientes
       FROM (
@@ -583,13 +583,13 @@ app.get('/api/dashboard-info', (req, res) => {
           (SELECT sender FROM messages WHERE conversation_id = c.id ORDER BY sent_at DESC LIMIT 1) AS last_message_sender
         FROM conversations c
       ) AS conv
-      WHERE last_message_sender != 'Sharky'
+      WHERE last_message_sender != 'Ecaf'
     `;
-    // Timeline global de mensajes recibidos (sender != "Sharky"), agrupados por fecha
+    // Timeline global de mensajes recibidos (sender != "Ecaf"), agrupados por fecha
     const queryTimeline = `
       SELECT DATE(sent_at) AS date, COUNT(*) AS count 
       FROM messages 
-      WHERE sender != 'Sharky'
+      WHERE sender != 'Ecaf'
       GROUP BY DATE(sent_at)
       ORDER BY date ASC
     `;
@@ -601,12 +601,12 @@ app.get('/api/dashboard-info', (req, res) => {
       }
       const total_mensajes = totalMessagesResult[0].total_mensajes;
   
-      db.query(queryMessagesSharky, (err, messagesSharkyResult) => {
+      db.query(queryMessagesEcaf, (err, messagesEcafResult) => {
         if (err) {
-          console.error('❌ Error al obtener mensajes de Sharky:', err.message);
-          return res.status(500).json({ error: 'Error al obtener mensajes de Sharky' });
+          console.error('❌ Error al obtener mensajes de Ecaf:', err.message);
+          return res.status(500).json({ error: 'Error al obtener mensajes de Ecaf' });
         }
-        const mensajes_sharky = messagesSharkyResult[0].mensajes_sharky;
+        const mensajes_Ecaf = messagesEcafResult[0].mensajes_Ecaf;
   
         db.query(queryTotalUsers, (err, totalUsersResult) => {
           if (err) {
@@ -629,7 +629,7 @@ app.get('/api/dashboard-info', (req, res) => {
               }
               res.json({
                 total_mensajes,
-                mensajes_sharky,
+                mensajes_Ecaf,
                 total_usuarios,
                 mensajes_pendientes,
                 timeline: timelineResult
@@ -986,7 +986,7 @@ app.get('/api/dashboard-certificados/estadisticas/:periodo', (req, res) => {
 app.post('/api/send-media', upload.single('file'), async (req, res) => {
   try {
     console.log('📝 Solicitud para enviar media recibida');
-    const { to, conversationId, caption = '', sender = 'Sharky' } = req.body;
+    const { to, conversationId, caption = '', sender = 'Ecaf' } = req.body;
     
     if (!to || !conversationId) {
       console.error('❌ Faltan campos requeridos: to y conversationId');
