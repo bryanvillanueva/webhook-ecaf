@@ -655,16 +655,33 @@ app.get('/api/dashboard-certificados', (req, res) => {
       GROUP BY tipo_certificado
     `,
     
-    // Certificados por estado
+    // Certificados por estado (agrupando estados similares)
     certificadosPorEstado: `
-      SELECT estado, COUNT(*) AS cantidad 
-      FROM certificados 
-      GROUP BY estado
+      SELECT
+        CASE
+          WHEN estado IN ('pendiente', 'pending', 'en espera', 'waiting', 'pendiente de pago', 'on-hold') THEN 'pendiente'
+          WHEN estado IN ('procesando', 'processing') THEN 'en_proceso'
+          WHEN estado IN ('completado', 'completed') THEN 'completado'
+          WHEN estado IN ('fallido', 'failed', 'cancelado', 'cancelled') THEN 'fallido'
+          ELSE 'otro'
+        END AS estado_normalizado,
+        COUNT(*) AS cantidad
+      FROM certificados
+      GROUP BY estado_normalizado
     `,
     
     // Certificados recientes (últimos 10)
     certificadosRecientes: `
-      SELECT id, nombre, apellido, tipo_certificado, referencia, estado, created_at
+      SELECT 
+        id, nombre, apellido, tipo_certificado, referencia, 
+        CASE
+          WHEN estado IN ('pendiente', 'pending', 'en espera', 'waiting', 'pendiente de pago', 'on-hold') THEN 'pendiente'
+          WHEN estado IN ('procesando', 'processing') THEN 'en_proceso'
+          WHEN estado IN ('completado', 'completed') THEN 'completado'
+          WHEN estado IN ('fallido', 'failed', 'cancelado', 'cancelled') THEN 'fallido'
+          ELSE estado
+        END AS estado,
+        created_at
       FROM certificados
       ORDER BY created_at DESC
       LIMIT 10
@@ -679,11 +696,13 @@ app.get('/api/dashboard-certificados', (req, res) => {
       LIMIT 30
     `,
     
-    // Tiempo promedio de procesamiento (entre created_at y updated_at para certificados completados)
+    // Tiempo promedio de procesamiento usando la tabla certificate_notifications
+    // para calcular el tiempo entre la creación y el estado completado
     tiempoPromedio: `
-      SELECT AVG(TIMESTAMPDIFF(HOUR, created_at, updated_at)) AS promedio_horas
-      FROM certificados
-      WHERE estado = 'completado' AND updated_at IS NOT NULL
+      SELECT AVG(TIMESTAMPDIFF(HOUR, c.created_at, n.created_at)) AS promedio_horas
+      FROM certificados c
+      JOIN certificate_notifications n ON c.id = n.certificate_id
+      WHERE n.new_status IN ('completado', 'completed')
     `
   };
   
@@ -717,7 +736,7 @@ app.get('/api/dashboard-certificados', (req, res) => {
       
       // Porcentaje de certificados completados
       if (dashboardData.certificadosPorEstado && dashboardData.totalCertificados) {
-        const completados = dashboardData.certificadosPorEstado.find(item => item.estado === 'completado');
+        const completados = dashboardData.certificadosPorEstado.find(item => item.estado_normalizado === 'completado');
         if (completados) {
           dashboardData.porcentajeCompletados = {
             porcentaje: (completados.cantidad / dashboardData.totalCertificados.total * 100).toFixed(2)
@@ -811,13 +830,24 @@ app.get('/api/dashboard-certificados/:id', (req, res) => {
   });
 });
 
-// Endpoint para obtener estadísticas de certificados por periodo
+// Endpoint para obtener estadísticas de certificados por periodo (con normalización de estados)
 app.get('/api/dashboard-certificados/estadisticas/:periodo', (req, res) => {
   const { periodo } = req.params;
   const { fechaInicio, fechaFin } = req.query;
   
   let query = '';
   let params = [];
+  
+  // Función para construir la normalización de estados en SQL
+  const estadoNormalizado = `
+    CASE
+      WHEN estado IN ('pendiente', 'pending', 'en espera', 'waiting', 'pendiente de pago', 'on-hold') THEN 'pendiente'
+      WHEN estado IN ('procesando', 'processing') THEN 'en_proceso'
+      WHEN estado IN ('completado', 'completed') THEN 'completado'
+      WHEN estado IN ('fallido', 'failed', 'cancelado', 'cancelled') THEN 'fallido'
+      ELSE 'otro'
+    END AS estado_normalizado
+  `;
   
   // Construir consulta según el periodo solicitado
   switch (periodo) {
@@ -826,9 +856,10 @@ app.get('/api/dashboard-certificados/estadisticas/:periodo', (req, res) => {
         SELECT 
           DATE(created_at) AS fecha,
           COUNT(*) AS total,
-          SUM(CASE WHEN estado = 'completado' THEN 1 ELSE 0 END) AS completados,
-          SUM(CASE WHEN estado = 'en_proceso' THEN 1 ELSE 0 END) AS en_proceso,
-          SUM(CASE WHEN estado = 'pendiente' THEN 1 ELSE 0 END) AS pendientes
+          SUM(CASE WHEN ${estadoNormalizado} = 'completado' THEN 1 ELSE 0 END) AS completados,
+          SUM(CASE WHEN ${estadoNormalizado} = 'en_proceso' THEN 1 ELSE 0 END) AS en_proceso,
+          SUM(CASE WHEN ${estadoNormalizado} = 'pendiente' THEN 1 ELSE 0 END) AS pendientes,
+          SUM(CASE WHEN ${estadoNormalizado} = 'fallido' THEN 1 ELSE 0 END) AS fallidos
         FROM certificados
         WHERE created_at BETWEEN ? AND ?
         GROUP BY DATE(created_at)
@@ -844,9 +875,10 @@ app.get('/api/dashboard-certificados/estadisticas/:periodo', (req, res) => {
           YEAR(created_at) AS anio,
           MONTH(created_at) AS mes,
           COUNT(*) AS total,
-          SUM(CASE WHEN estado = 'completado' THEN 1 ELSE 0 END) AS completados,
-          SUM(CASE WHEN estado = 'en_proceso' THEN 1 ELSE 0 END) AS en_proceso,
-          SUM(CASE WHEN estado = 'pendiente' THEN 1 ELSE 0 END) AS pendientes
+          SUM(CASE WHEN ${estadoNormalizado} = 'completado' THEN 1 ELSE 0 END) AS completados,
+          SUM(CASE WHEN ${estadoNormalizado} = 'en_proceso' THEN 1 ELSE 0 END) AS en_proceso,
+          SUM(CASE WHEN ${estadoNormalizado} = 'pendiente' THEN 1 ELSE 0 END) AS pendientes,
+          SUM(CASE WHEN ${estadoNormalizado} = 'fallido' THEN 1 ELSE 0 END) AS fallidos
         FROM certificados
         WHERE created_at BETWEEN ? AND ?
         GROUP BY YEAR(created_at), MONTH(created_at)
@@ -860,9 +892,10 @@ app.get('/api/dashboard-certificados/estadisticas/:periodo', (req, res) => {
         SELECT 
           tipo_certificado,
           COUNT(*) AS total,
-          SUM(CASE WHEN estado = 'completado' THEN 1 ELSE 0 END) AS completados,
-          SUM(CASE WHEN estado = 'en_proceso' THEN 1 ELSE 0 END) AS en_proceso,
-          SUM(CASE WHEN estado = 'pendiente' THEN 1 ELSE 0 END) AS pendientes
+          SUM(CASE WHEN ${estadoNormalizado} = 'completado' THEN 1 ELSE 0 END) AS completados,
+          SUM(CASE WHEN ${estadoNormalizado} = 'en_proceso' THEN 1 ELSE 0 END) AS en_proceso,
+          SUM(CASE WHEN ${estadoNormalizado} = 'pendiente' THEN 1 ELSE 0 END) AS pendientes,
+          SUM(CASE WHEN ${estadoNormalizado} = 'fallido' THEN 1 ELSE 0 END) AS fallidos
         FROM certificados
         WHERE created_at BETWEEN ? AND ?
         GROUP BY tipo_certificado
