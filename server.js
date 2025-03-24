@@ -642,7 +642,15 @@ app.get('/api/dashboard-info', (req, res) => {
   });
   
 // Endpoint para obtener información del dashboard de certificados
+// Endpoint modificado para incluir cálculos financieros
 app.get('/api/dashboard-certificados', (req, res) => {
+  // Definir precios por tipo de certificado
+  const PRECIOS = {
+    'Certificado de notas': 10000,
+    'Certificado general': 20000,
+    'Certificado de asistencia': 12000
+  };
+
   // Array de consultas que necesitamos ejecutar
   const queries = {
     // Total de certificados
@@ -697,12 +705,27 @@ app.get('/api/dashboard-certificados', (req, res) => {
     `,
     
     // Tiempo promedio de procesamiento usando la tabla certificate_notifications
-    // para calcular el tiempo entre la creación y el estado completado
     tiempoPromedio: `
       SELECT AVG(TIMESTAMPDIFF(HOUR, c.created_at, n.created_at)) AS promedio_horas
       FROM certificados c
       JOIN certificate_notifications n ON c.id = n.certificate_id
       WHERE n.new_status IN ('completado', 'completed')
+    `,
+    
+    // Consulta para cálculos financieros - Certificados por tipo y estado
+    certificadosPorTipoYEstado: `
+      SELECT 
+        tipo_certificado,
+        CASE
+          WHEN estado IN ('pendiente', 'pending', 'en espera', 'waiting', 'pendiente de pago', 'on-hold') THEN 'pendiente'
+          WHEN estado IN ('procesando', 'processing') THEN 'en_proceso'
+          WHEN estado IN ('completado', 'completed') THEN 'completado'
+          WHEN estado IN ('fallido', 'failed', 'cancelado', 'cancelled') THEN 'fallido'
+          ELSE 'otro'
+        END AS estado_normalizado,
+        COUNT(*) AS cantidad
+      FROM certificados
+      GROUP BY tipo_certificado, estado_normalizado
     `
   };
   
@@ -744,6 +767,32 @@ app.get('/api/dashboard-certificados', (req, res) => {
         }
       }
       
+      // Cálculos financieros
+      if (dashboardData.certificadosPorTipoYEstado) {
+        // Inicializar totales por estado
+        const finanzas = {
+          gananciasRealizadas: 0,    // Completados
+          gananciasEsperadas: 0,     // Pendientes + En proceso
+          gananciasPerdidas: 0       // Fallidos
+        };
+        
+        // Calcular valores por tipo de certificado y estado
+        dashboardData.certificadosPorTipoYEstado.forEach(item => {
+          const precio = PRECIOS[item.tipo_certificado] || 0;
+          const valorTotal = precio * item.cantidad;
+          
+          if (item.estado_normalizado === 'completado') {
+            finanzas.gananciasRealizadas += valorTotal;
+          } else if (item.estado_normalizado === 'pendiente' || item.estado_normalizado === 'en_proceso') {
+            finanzas.gananciasEsperadas += valorTotal;
+          } else if (item.estado_normalizado === 'fallido') {
+            finanzas.gananciasPerdidas += valorTotal;
+          }
+        });
+        
+        dashboardData.finanzas = finanzas;
+      }
+      
       // Añadir estadísticas de certificados por mes (para gráficos de tendencia)
       db.query(`
         SELECT 
@@ -777,6 +826,7 @@ app.get('/api/dashboard-certificados', (req, res) => {
       });
     });
 });
+
 
 // Endpoint para obtener información de un certificado específico
 app.get('/api/dashboard-certificados/:id', (req, res) => {
