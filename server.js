@@ -641,7 +641,255 @@ app.get('/api/dashboard-info', (req, res) => {
     });
   });
   
+// Endpoint para obtener información del dashboard de certificados
+app.get('/api/dashboard-certificados', (req, res) => {
+  // Array de consultas que necesitamos ejecutar
+  const queries = {
+    // Total de certificados
+    totalCertificados: 'SELECT COUNT(*) AS total FROM certificados',
+    
+    // Certificados por tipo
+    certificadosPorTipo: `
+      SELECT tipo_certificado, COUNT(*) AS cantidad 
+      FROM certificados 
+      GROUP BY tipo_certificado
+    `,
+    
+    // Certificados por estado
+    certificadosPorEstado: `
+      SELECT estado, COUNT(*) AS cantidad 
+      FROM certificados 
+      GROUP BY estado
+    `,
+    
+    // Certificados recientes (últimos 10)
+    certificadosRecientes: `
+      SELECT id, nombre, apellido, tipo_certificado, referencia, estado, created_at
+      FROM certificados
+      ORDER BY created_at DESC
+      LIMIT 10
+    `,
+    
+    // Timeline de creación de certificados (por día)
+    timelineCertificados: `
+      SELECT DATE(created_at) AS fecha, COUNT(*) AS cantidad 
+      FROM certificados 
+      GROUP BY DATE(created_at)
+      ORDER BY fecha ASC
+      LIMIT 30
+    `,
+    
+    // Tiempo promedio de procesamiento (entre created_at y updated_at para certificados completados)
+    tiempoPromedio: `
+      SELECT AVG(TIMESTAMPDIFF(HOUR, created_at, updated_at)) AS promedio_horas
+      FROM certificados
+      WHERE estado = 'completado' AND updated_at IS NOT NULL
+    `
+  };
+  
+  // Objeto para almacenar todos los resultados
+  const dashboardData = {};
+  
+  // Ejecutar todas las consultas en paralelo
+  const promises = Object.entries(queries).map(([key, query]) => {
+    return new Promise((resolve, reject) => {
+      db.query(query, (err, results) => {
+        if (err) {
+          console.error(`❌ Error al obtener ${key}:`, err.message);
+          reject(err);
+        } else {
+          // Para consultas que devuelven un solo valor, simplificar la respuesta
+          if (key === 'totalCertificados' || key === 'tiempoPromedio') {
+            dashboardData[key] = results[0];
+          } else {
+            dashboardData[key] = results;
+          }
+          resolve();
+        }
+      });
+    });
+  });
+  
+  // Cuando todas las promesas se resuelvan, devolver los datos
+  Promise.all(promises)
+    .then(() => {
+      // Añadir métricas calculadas adicionales si es necesario
+      
+      // Porcentaje de certificados completados
+      if (dashboardData.certificadosPorEstado && dashboardData.totalCertificados) {
+        const completados = dashboardData.certificadosPorEstado.find(item => item.estado === 'completado');
+        if (completados) {
+          dashboardData.porcentajeCompletados = {
+            porcentaje: (completados.cantidad / dashboardData.totalCertificados.total * 100).toFixed(2)
+          };
+        }
+      }
+      
+      // Añadir estadísticas de certificados por mes (para gráficos de tendencia)
+      db.query(`
+        SELECT 
+          YEAR(created_at) AS año,
+          MONTH(created_at) AS mes,
+          COUNT(*) AS cantidad
+        FROM certificados
+        GROUP BY YEAR(created_at), MONTH(created_at)
+        ORDER BY año ASC, mes ASC
+        LIMIT 12
+      `, (err, results) => {
+        if (err) {
+          console.error('❌ Error al obtener estadísticas por mes:', err.message);
+          dashboardData.certificadosPorMes = [];
+        } else {
+          dashboardData.certificadosPorMes = results.map(item => ({
+            ...item,
+            etiqueta: `${item.mes}/${item.año}`
+          }));
+        }
+        
+        // Enviar la respuesta completa
+        res.json(dashboardData);
+      });
+    })
+    .catch(error => {
+      console.error('❌ Error al obtener datos del dashboard de certificados:', error.message);
+      res.status(500).json({ 
+        error: 'Error al obtener datos del dashboard de certificados',
+        details: error.message 
+      });
+    });
+});
 
+// Endpoint para obtener información de un certificado específico
+app.get('/api/dashboard-certificados/:id', (req, res) => {
+  const { id } = req.params;
+  
+  if (!id) {
+    return res.status(400).json({ error: 'Se requiere el ID del certificado' });
+  }
+  
+  // Consulta principal para obtener detalles del certificado
+  const sqlCertificado = `
+    SELECT * FROM certificados WHERE id = ? LIMIT 1
+  `;
+  
+  // Consulta para obtener el historial de cambios de estado
+  const sqlHistorial = `
+    SELECT * FROM certificate_notifications 
+    WHERE certificate_id = ? 
+    ORDER BY created_at ASC
+  `;
+  
+  // Ejecutar ambas consultas
+  db.query(sqlCertificado, [id], (err, certificadoResult) => {
+    if (err) {
+      console.error('❌ Error al obtener detalles del certificado:', err.message);
+      return res.status(500).json({ error: 'Error al obtener detalles del certificado' });
+    }
+    
+    if (certificadoResult.length === 0) {
+      return res.status(404).json({ error: 'Certificado no encontrado' });
+    }
+    
+    const certificado = certificadoResult[0];
+    
+    // Obtener historial
+    db.query(sqlHistorial, [id], (err, historialResult) => {
+      if (err) {
+        console.error('❌ Error al obtener historial del certificado:', err.message);
+        return res.status(500).json({
+          error: 'Error al obtener historial del certificado',
+          certificado // Incluir el certificado aunque falle el historial
+        });
+      }
+      
+      // Respuesta completa con certificado e historial
+      res.json({
+        certificado,
+        historial: historialResult
+      });
+    });
+  });
+});
+
+// Endpoint para obtener estadísticas de certificados por periodo
+app.get('/api/dashboard-certificados/estadisticas/:periodo', (req, res) => {
+  const { periodo } = req.params;
+  const { fechaInicio, fechaFin } = req.query;
+  
+  let query = '';
+  let params = [];
+  
+  // Construir consulta según el periodo solicitado
+  switch (periodo) {
+    case 'diario':
+      query = `
+        SELECT 
+          DATE(created_at) AS fecha,
+          COUNT(*) AS total,
+          SUM(CASE WHEN estado = 'completado' THEN 1 ELSE 0 END) AS completados,
+          SUM(CASE WHEN estado = 'en_proceso' THEN 1 ELSE 0 END) AS en_proceso,
+          SUM(CASE WHEN estado = 'pendiente' THEN 1 ELSE 0 END) AS pendientes
+        FROM certificados
+        WHERE created_at BETWEEN ? AND ?
+        GROUP BY DATE(created_at)
+        ORDER BY fecha ASC
+      `;
+      params = [fechaInicio || '2000-01-01', fechaFin || '2099-12-31'];
+      break;
+      
+    case 'mensual':
+      query = `
+        SELECT 
+          CONCAT(YEAR(created_at), '-', MONTH(created_at)) AS periodo,
+          YEAR(created_at) AS anio,
+          MONTH(created_at) AS mes,
+          COUNT(*) AS total,
+          SUM(CASE WHEN estado = 'completado' THEN 1 ELSE 0 END) AS completados,
+          SUM(CASE WHEN estado = 'en_proceso' THEN 1 ELSE 0 END) AS en_proceso,
+          SUM(CASE WHEN estado = 'pendiente' THEN 1 ELSE 0 END) AS pendientes
+        FROM certificados
+        WHERE created_at BETWEEN ? AND ?
+        GROUP BY YEAR(created_at), MONTH(created_at)
+        ORDER BY anio ASC, mes ASC
+      `;
+      params = [fechaInicio || '2000-01-01', fechaFin || '2099-12-31'];
+      break;
+      
+    case 'tipo':
+      query = `
+        SELECT 
+          tipo_certificado,
+          COUNT(*) AS total,
+          SUM(CASE WHEN estado = 'completado' THEN 1 ELSE 0 END) AS completados,
+          SUM(CASE WHEN estado = 'en_proceso' THEN 1 ELSE 0 END) AS en_proceso,
+          SUM(CASE WHEN estado = 'pendiente' THEN 1 ELSE 0 END) AS pendientes
+        FROM certificados
+        WHERE created_at BETWEEN ? AND ?
+        GROUP BY tipo_certificado
+        ORDER BY total DESC
+      `;
+      params = [fechaInicio || '2000-01-01', fechaFin || '2099-12-31'];
+      break;
+      
+    default:
+      return res.status(400).json({ error: 'Periodo no válido. Use: diario, mensual o tipo' });
+  }
+  
+  // Ejecutar la consulta
+  db.query(query, params, (err, results) => {
+    if (err) {
+      console.error(`❌ Error al obtener estadísticas por ${periodo}:`, err.message);
+      return res.status(500).json({ error: `Error al obtener estadísticas por ${periodo}` });
+    }
+    
+    res.json({
+      periodo,
+      fechaInicio: params[0],
+      fechaFin: params[1],
+      resultados: results
+    });
+  });
+});
   // END DASHBOARD //
 
   // Endpoint to send media messages (documents or images) from the frontend
