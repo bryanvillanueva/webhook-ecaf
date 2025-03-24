@@ -35,17 +35,39 @@ const server = http.createServer(app);
 const { Server } = require('socket.io');
 const io = new Server(server, {
   cors: {
-    origin: "*", // En producción, limita esto a tus dominios permitidos
-    methods: ["GET", "POST"]
-  }
+    origin: "*", // En producción, limita esto a tus dominios frontend específicos
+    methods: ["GET", "POST"],
+    allowedHeaders: ["my-custom-header"],
+    credentials: true
+  },
+  // Configuración adicional para mejorar la estabilidad
+  transports: ['websocket', 'polling'],
+  pingTimeout: 60000, // Cuánto tiempo esperar antes de considerar la conexión cerrada
+  pingInterval: 25000, // Intervalo para verificar la conexión
+  // Path predeterminado, solo asegúrate de que coincida con el frontend
+  path: '/socket.io/'
 });
 
-// Configura Socket.IO para las conexiones
+
+// Mejorar los logs de conexión/desconexión
 io.on('connection', (socket) => {
-  console.log('🔌 Cliente conectado a Socket.IO:', socket.id);
+  console.log('🔌 Cliente conectado a Socket.IO:', socket.id, 'desde IP:', socket.handshake.address);
   
-  socket.on('disconnect', () => {
-    console.log('🔌 Cliente desconectado de Socket.IO:', socket.id);
+  // Puedes añadir un ping/pong personalizado para verificar la conexión
+  socket.on('ping', (callback) => {
+    if (callback && typeof callback === 'function') {
+      callback({ status: 'ok', timestamp: new Date() });
+    }
+  });
+
+  // Monitorear desconexiones con la razón
+  socket.on('disconnect', (reason) => {
+    console.log('🔌 Cliente desconectado de Socket.IO:', socket.id, 'Razón:', reason);
+  });
+  
+  // Manejar errores de socket
+  socket.on('error', (error) => {
+    console.error('🔌 Error de socket:', socket.id, error);
   });
 });
 
@@ -1533,14 +1555,15 @@ function startNotificationPolling() {
       const [notifications] = await db.promise().query(query, [lastNotificationId]);
       
       if (notifications.length > 0) {
-        console.log(`🔔 Se encontraron ${notifications.length} nuevas notificaciones`);
+        console.log(`🔔 Se encontraron ${notifications.length} nuevas notificaciones. Último ID previo: ${lastNotificationId}`);
         
         // Actualizar el último ID procesado
         lastNotificationId = notifications[notifications.length - 1].id;
+        console.log(`🔄 Actualizando lastNotificationId a: ${lastNotificationId}`);
         
         // Emitir cada notificación a través de Socket.IO
         notifications.forEach(notification => {
-          io.emit('certificateStatusChanged', {
+          const notificationData = {
             id: notification.id,
             certificate_id: notification.certificate_id,
             oldStatus: notification.old_status,
@@ -1550,8 +1573,19 @@ function startNotificationPolling() {
             documentNumber: notification.numero_identificacion,
             certificateType: notification.tipo_certificado,
             timestamp: notification.created_at
-          });
+          };
+          
+          console.log(`📣 Emitiendo notificación ID ${notification.id} para certificado ${notification.certificate_id}`);
+          io.emit('certificateStatusChanged', notificationData);
+          console.log(`✅ Notificación emitida`);
+          
+          // Verificar clientes conectados
+          const connectedClients = io.sockets.sockets.size;
+          console.log(`ℹ️ Clientes Socket.IO conectados: ${connectedClients}`);
         });
+      } else {
+        // Opcional: log periódico para verificar que el polling está funcionando
+        console.log(`⏱️ Polling de notificaciones: sin nuevas notificaciones. Último ID: ${lastNotificationId}`);
       }
     } catch (error) {
       console.error('❌ Error en el polling de notificaciones:', error.message);
