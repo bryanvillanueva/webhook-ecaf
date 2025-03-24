@@ -9,6 +9,26 @@ const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const bcryptjs = require('bcryptjs');
 
+
+
+
+const app = express();
+app.use(bodyParser.json());
+app.use(cors());
+app.use(express.json({ extended: true }));
+app.use(express.urlencoded({ extended: true }));
+
+const db = mysql.createPool({
+    host: 'srv1041.hstgr.io',
+    user: 'u255066530_ecafAdmin',
+    password: 'wZ>3QG:WBk|BS0l$$BjBA0E4y',
+    database: 'u255066530_ecaf',
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+    charset: 'utf8mb4'
+}); 
+
 // Importa Socket.IO y configura el servidor HTTP
 const http = require('http');
 const server = http.createServer(app);
@@ -28,24 +48,6 @@ io.on('connection', (socket) => {
     console.log('🔌 Cliente desconectado de Socket.IO:', socket.id);
   });
 });
-
-
-const app = express();
-app.use(bodyParser.json());
-app.use(cors());
-app.use(express.json({ extended: true }));
-app.use(express.urlencoded({ extended: true }));
-
-const db = mysql.createPool({
-    host: 'srv1041.hstgr.io',
-    user: 'u255066530_ecafAdmin',
-    password: 'wZ>3QG:WBk|BS0l$$BjBA0E4y',
-    database: 'u255066530_ecaf',
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
-    charset: 'utf8mb4'
-}); 
 
 // Verifica la conexión a la base de datos
 db.getConnection((err, connection) => {
