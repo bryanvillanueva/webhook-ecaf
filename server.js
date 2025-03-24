@@ -1130,20 +1130,107 @@ app.post('/api/certificados', (req, res) => {
     return res.status(400).json({ error: 'Todos los campos son obligatorios' });
   }
 
-  // Preparamos la consulta SQL para insertar el registro.
-  // La columna "estado" se asigna por defecto a 'pendiente' y "created_at" se genera automáticamente.
-  const sql = `
-    INSERT INTO certificados 
-      (nombre, apellido, tipo_identificacion, numero_identificacion, tipo_certificado, telefono, correo)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `;
-
-  db.query(sql, [nombre, apellido, tipo_identificacion, numero_identificacion, tipo_certificado, telefono, correo], (err, result) => {
+  // Iniciamos una transacción para asegurar que ambas inserciones sean exitosas
+  db.getConnection((err, connection) => {
     if (err) {
-      console.error('❌ Error al insertar certificado:', err.message);
-      return res.status(500).json({ error: 'Error al insertar certificado en la base de datos' });
+      console.error('❌ Error al obtener conexión para transacción:', err.message);
+      return res.status(500).json({ error: 'Error de conexión a la base de datos' });
     }
-    res.status(201).json({ message: 'Certificado insertado exitosamente', id: result.insertId });
+
+    connection.beginTransaction(err => {
+      if (err) {
+        connection.release();
+        console.error('❌ Error al iniciar transacción:', err.message);
+        return res.status(500).json({ error: 'Error al iniciar transacción' });
+      }
+
+      // Preparamos la consulta SQL para insertar el registro en certificados
+      const sqlCertificado = `
+        INSERT INTO certificados 
+          (nombre, apellido, tipo_identificacion, numero_identificacion, tipo_certificado, telefono, correo)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `;
+
+      connection.query(sqlCertificado, [nombre, apellido, tipo_identificacion, numero_identificacion, tipo_certificado, telefono, correo], (err, certificadoResult) => {
+        if (err) {
+          return connection.rollback(() => {
+            connection.release();
+            console.error('❌ Error al insertar certificado:', err.message);
+            res.status(500).json({ error: 'Error al insertar certificado en la base de datos' });
+          });
+        }
+
+        const certificadoId = certificadoResult.insertId;
+        
+        // Determinar el prefijo según el tipo de certificado
+        let prefijo = '';
+        switch (tipo_certificado.toLowerCase()) {
+          case 'notas':
+            prefijo = 'CNTS000';
+            break;
+          case 'asistencia':
+          case 'conducta':
+            prefijo = 'CASS000';
+            break;
+          case 'general':
+            prefijo = 'CGNR000';
+            break;
+          default:
+            prefijo = 'CGNR000'; // Valor por defecto
+        }
+
+        // Generar la referencia en el formato: ID + prefijo + certificadoId
+        // Asumimos que el ID de la tabla referencia será auto_increment
+        // Por lo tanto, necesitamos consultar el próximo ID que se asignará
+        connection.query('SELECT AUTO_INCREMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = "referencia"', (err, idResult) => {
+          if (err) {
+            return connection.rollback(() => {
+              connection.release();
+              console.error('❌ Error al obtener próximo ID de referencia:', err.message);
+              res.status(500).json({ error: 'Error al generar referencia' });
+            });
+          }
+
+          const proximoId = idResult[0].AUTO_INCREMENT;
+          const referencia = `${proximoId}${prefijo}${certificadoId}`;
+
+          // Insertar en la tabla referencia
+          const sqlReferencia = `
+            INSERT INTO referencia 
+              (id_certificado, referencia)
+            VALUES (?, ?)
+          `;
+
+          connection.query(sqlReferencia, [certificadoId, referencia], (err, referenciaResult) => {
+            if (err) {
+              return connection.rollback(() => {
+                connection.release();
+                console.error('❌ Error al insertar referencia:', err.message);
+                res.status(500).json({ error: 'Error al insertar referencia en la base de datos' });
+              });
+            }
+
+            // Si todo ha ido bien, confirmamos la transacción
+            connection.commit(err => {
+              if (err) {
+                return connection.rollback(() => {
+                  connection.release();
+                  console.error('❌ Error al confirmar transacción:', err.message);
+                  res.status(500).json({ error: 'Error al confirmar operación en la base de datos' });
+                });
+              }
+              
+              connection.release();
+              res.status(201).json({ 
+                message: 'Certificado y referencia insertados exitosamente', 
+                id: certificadoId,
+                referencia: referencia
+              });
+            });
+          });
+        });
+      });
+    });
   });
 });
 
