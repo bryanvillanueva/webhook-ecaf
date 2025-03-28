@@ -170,7 +170,7 @@ app.post('/webhook', async (req, res) => {
       const webhookMap = {
           'text': 'https://hook.eu2.make.com/ue8dxmxmuq6sr5own5yftq89ynethvqn',
           'audio': 'https://hook.eu2.make.com/pch3avcjrya2et6gqol5vdoyh11txfrl',
-          'image': 'https://hook.eu2.make.com/smdk4pbh2txc94fdvj73mmpt3ehdxuj3',
+          'image': 'https://hook.eu2.make.com/dgxr45oyidtttvwbge4c1wjycnnlfj4y',
           'document': 'https://hook.eu2.make.com/smdk4pbh2txc94fdvj73mmpt3ehdxuj3'
       };
 
