@@ -1974,7 +1974,6 @@ function startNotificationPolling() {
 // Importaciones necesarias para el procesamiento de Excel
 // Asegúrate de instalar xlsx con: npm install xlsx --save
 
-
 // Configuración de multer para archivos Excel
 const excelStorage = multer.memoryStorage();
 const excelUpload = multer({
@@ -2113,14 +2112,14 @@ async function procesarEstudiantes(data, resultados) {
         continue;
       }
       
-      // Verificar si el estudiante ya existe
+      // Verificar si el estudiante ya existe - CORREGIDO: usando id_estudiante
       const [existentes] = await db.promise().query(
-        'SELECT id FROM estudiantes WHERE tipo_documento = ? AND numero_documento = ?',
+        'SELECT id_estudiante FROM estudiantes WHERE tipo_documento = ? AND numero_documento = ?',
         [estudianteNormalizado.tipo_documento, estudianteNormalizado.numero_documento]
       );
       
       if (existentes.length > 0) {
-        // Actualizar estudiante existente
+        // Actualizar estudiante existente - CORREGIDO: usando id_estudiante
         await db.promise().query(
           `UPDATE estudiantes SET 
             nombres = ?, 
@@ -2130,9 +2129,8 @@ async function procesarEstudiantes(data, resultados) {
             email = ?, 
             telefono = ?, 
             direccion = ?, 
-            ciudad = ?,
-            actualizado_en = NOW()
-          WHERE tipo_documento = ? AND numero_documento = ?`,
+            ciudad = ?
+          WHERE id_estudiante = ?`,
           [
             estudianteNormalizado.nombres,
             estudianteNormalizado.apellidos,
@@ -2142,14 +2140,13 @@ async function procesarEstudiantes(data, resultados) {
             estudianteNormalizado.telefono,
             estudianteNormalizado.direccion,
             estudianteNormalizado.ciudad,
-            estudianteNormalizado.tipo_documento,
-            estudianteNormalizado.numero_documento
+            existentes[0].id_estudiante
           ]
         );
         
         console.log(`✅ Estudiante actualizado: ${estudianteNormalizado.nombres} ${estudianteNormalizado.apellidos}`);
       } else {
-        // Insertar nuevo estudiante
+        // Insertar nuevo estudiante - No necesita cambios
         await db.promise().query(
           `INSERT INTO estudiantes (
             tipo_documento, 
@@ -2161,8 +2158,8 @@ async function procesarEstudiantes(data, resultados) {
             email, 
             telefono, 
             direccion, 
-            ciudad, 
-            creado_en
+            ciudad,
+            fecha_registro
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
           [
             estudianteNormalizado.tipo_documento,
@@ -2217,9 +2214,9 @@ async function procesarNotas(data, resultados) {
         continue;
       }
       
-      // 1. Verificar que el estudiante exista
+      // 1. Verificar que el estudiante exista - CORREGIDO: usando id_estudiante
       const [estudiantesExistentes] = await db.promise().query(
-        'SELECT id FROM estudiantes WHERE tipo_documento = ? AND numero_documento = ?',
+        'SELECT id_estudiante FROM estudiantes WHERE tipo_documento = ? AND numero_documento = ?',
         [registroNormalizado.tipo_documento, registroNormalizado.numero_documento]
       );
       
@@ -2231,83 +2228,84 @@ async function procesarNotas(data, resultados) {
         continue;
       }
       
-      const estudianteId = estudiantesExistentes[0].id;
+      const estudianteId = estudiantesExistentes[0].id_estudiante;
       
-      // 2. Verificar/Crear el programa
+      // 2. Verificar/Crear el programa - CORREGIDO: usando id_programa
       let programaId;
       const [programasExistentes] = await db.promise().query(
-        'SELECT id FROM programas WHERE nombre = ?',
+        'SELECT id_programa FROM programas WHERE nombre = ?',
         [registroNormalizado.nombre_programa]
       );
       
       if (programasExistentes.length === 0) {
         const [resultPrograma] = await db.promise().query(
-          'INSERT INTO programas (nombre, tipo, creado_en) VALUES (?, ?, NOW())',
-          [registroNormalizado.nombre_programa, registroNormalizado.tipo_programa]
+          'INSERT INTO programas (nombre, tipo, estado, descripcion, fecha_inicio) VALUES (?, ?, "Activo", ?, NOW())',
+          [registroNormalizado.nombre_programa, registroNormalizado.tipo_programa, 
+           `Programa ${registroNormalizado.nombre_programa}`]
         );
         programaId = resultPrograma.insertId;
         console.log(`✅ Nuevo programa creado: ${registroNormalizado.nombre_programa}`);
       } else {
-        programaId = programasExistentes[0].id;
+        programaId = programasExistentes[0].id_programa;
       }
       
-      // 3. Verificar/Crear relación estudiante-programa
+      // 3. Verificar/Crear relación estudiante-programa - CORREGIDO: usando id_estudiante_programa
       let relacionId;
       const [relacionesExistentes] = await db.promise().query(
-        'SELECT id FROM estudiante_programa WHERE estudiante_id = ? AND programa_id = ?',
+        'SELECT id_estudiante_programa FROM estudiante_programa WHERE id_estudiante = ? AND id_programa = ?',
         [estudianteId, programaId]
       );
       
       if (relacionesExistentes.length === 0) {
         const [resultRelacion] = await db.promise().query(
-          'INSERT INTO estudiante_programa (estudiante_id, programa_id, estado, fecha_inicio, creado_en) VALUES (?, ?, ?, NOW(), NOW())',
+          'INSERT INTO estudiante_programa (id_estudiante, id_programa, estado, fecha_asignacion) VALUES (?, ?, ?, NOW())',
           [estudianteId, programaId, registroNormalizado.estado_programa]
         );
         relacionId = resultRelacion.insertId;
         console.log(`✅ Nueva relación estudiante-programa creada`);
       } else {
-        relacionId = relacionesExistentes[0].id;
+        relacionId = relacionesExistentes[0].id_estudiante_programa;
         // Actualizar estado si es necesario
         await db.promise().query(
-          'UPDATE estudiante_programa SET estado = ?, actualizado_en = NOW() WHERE id = ?',
+          'UPDATE estudiante_programa SET estado = ? WHERE id_estudiante_programa = ?',
           [registroNormalizado.estado_programa, relacionId]
         );
       }
       
-      // 4. Verificar/Crear la materia
+      // 4. Verificar/Crear la materia - CORREGIDO: usando id_materia
       let materiaId;
       const [materiasExistentes] = await db.promise().query(
-        'SELECT id FROM materias WHERE nombre = ? AND programa_id = ?',
+        'SELECT id_materia FROM materias WHERE nombre = ? AND id_programa = ?',
         [registroNormalizado.materia, programaId]
       );
       
       if (materiasExistentes.length === 0) {
         const [resultMateria] = await db.promise().query(
-          'INSERT INTO materias (nombre, descripcion, programa_id, creado_en) VALUES (?, ?, ?, NOW())',
+          'INSERT INTO materias (nombre, descripcion, id_programa) VALUES (?, ?, ?)',
           [registroNormalizado.materia, registroNormalizado.descripcion_materia || registroNormalizado.materia, programaId]
         );
         materiaId = resultMateria.insertId;
         console.log(`✅ Nueva materia creada: ${registroNormalizado.materia}`);
       } else {
-        materiaId = materiasExistentes[0].id;
+        materiaId = materiasExistentes[0].id_materia;
       }
       
-      // 5. Registrar la nota
+      // 5. Registrar la nota - CORREGIDO: usando id_estudiante_materia
       const [notasExistentes] = await db.promise().query(
-        'SELECT id FROM estudiante_materia WHERE estudiante_id = ? AND materia_id = ? AND periodo = ?',
-        [estudianteId, materiaId, registroNormalizado.periodo]
+        'SELECT id_estudiante_materia FROM estudiante_materia WHERE id_estudiante_programa = ? AND id_materia = ? AND periodo = ?',
+        [relacionId, materiaId, registroNormalizado.periodo]
       );
       
       if (notasExistentes.length === 0) {
         await db.promise().query(
-          'INSERT INTO estudiante_materia (estudiante_id, materia_id, nota, periodo, creado_en) VALUES (?, ?, ?, ?, NOW())',
-          [estudianteId, materiaId, registroNormalizado.nota, registroNormalizado.periodo]
+          'INSERT INTO estudiante_materia (id_estudiante_programa, id_materia, nota, periodo) VALUES (?, ?, ?, ?)',
+          [relacionId, materiaId, registroNormalizado.nota, registroNormalizado.periodo]
         );
         console.log(`✅ Nueva nota registrada: ${registroNormalizado.materia} - ${registroNormalizado.nota}`);
       } else {
         await db.promise().query(
-          'UPDATE estudiante_materia SET nota = ?, actualizado_en = NOW() WHERE id = ?',
-          [registroNormalizado.nota, notasExistentes[0].id]
+          'UPDATE estudiante_materia SET nota = ? WHERE id_estudiante_materia = ?',
+          [registroNormalizado.nota, notasExistentes[0].id_estudiante_materia]
         );
         console.log(`✅ Nota actualizada: ${registroNormalizado.materia} - ${registroNormalizado.nota}`);
       }
