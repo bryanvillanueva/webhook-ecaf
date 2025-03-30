@@ -8,6 +8,7 @@ const FormData = require('form-data'); // Add this import at the top of your fil
 const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const bcryptjs = require('bcryptjs');
+const XLSX = require('xlsx');
 
 
 
@@ -1966,6 +1967,365 @@ function startNotificationPolling() {
     }
   }, POLLING_INTERVAL);
 }
+
+
+// CARGA DE DOCUMENTOS CON EXCEL // 
+
+// Importaciones necesarias para el procesamiento de Excel
+// Asegúrate de instalar xlsx con: npm install xlsx --save
+
+
+// Configuración de multer para archivos Excel
+const excelStorage = multer.memoryStorage();
+const excelUpload = multer({
+  storage: excelStorage,
+  fileFilter: (req, file, cb) => {
+    const allowedMimes = [
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    ];
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Formato de archivo no válido. Solo se permite Excel (.xls, .xlsx)'), false);
+    }
+  },
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB
+  }
+});
+
+// Endpoint para servir las plantillas
+app.get('/api/plantillas-excel/:tipo', (req, res) => {
+  try {
+    const { tipo } = req.params;
+    
+    if (!['estudiantes', 'notas'].includes(tipo.toLowerCase())) {
+      return res.status(400).json({ error: 'Tipo de plantilla no válido. Use "estudiantes" o "notas".' });
+    }
+    
+    // Ruta a las plantillas
+    const rutaPlantilla = `./plantillas/Plantilla_${tipo === 'estudiantes' ? 'Estudiantes' : 'Notas_Programas'}.xlsx`;
+    
+    // Verificar existencia del archivo
+    if (!fs.existsSync(rutaPlantilla)) {
+      console.error(`❌ Plantilla no encontrada: ${rutaPlantilla}`);
+      return res.status(404).json({ error: 'Plantilla no encontrada' });
+    }
+    
+    // Enviar el archivo
+    res.download(rutaPlantilla, `Plantilla_${tipo.charAt(0).toUpperCase() + tipo.slice(1)}.xlsx`);
+    
+  } catch (error) {
+    console.error('❌ Error al servir plantilla:', error.message);
+    res.status(500).json({ error: 'Error al procesar la solicitud' });
+  }
+});
+
+// Endpoint para cargar archivos Excel
+app.post('/api/cargar-excel', excelUpload.single('archivo'), async (req, res) => {
+  try {
+    // Validar archivo
+    if (!req.file) {
+      return res.status(400).json({ error: 'No se encontró ningún archivo' });
+    }
+    
+    // Validar tipo
+    const { tipo } = req.body;
+    if (!tipo || !['estudiantes', 'notas'].includes(tipo.toLowerCase())) {
+      return res.status(400).json({ error: 'Tipo de carga no válido. Use "estudiantes" o "notas".' });
+    }
+    
+    console.log(`📊 Procesando archivo ${req.file.originalname} de tipo ${tipo}`);
+    
+    // Leer el archivo Excel
+    const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+    
+    // Obtener la primera hoja
+    const firstSheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[firstSheetName];
+    
+    // Convertir a JSON
+    const data = XLSX.utils.sheet_to_json(worksheet, { defval: null });
+    
+    if (data.length === 0) {
+      return res.status(400).json({ error: 'El archivo Excel no contiene datos' });
+    }
+    
+    console.log(`📊 Se procesarán ${data.length} registros de tipo ${tipo}`);
+    
+    // Resultados
+    const resultados = {
+      exitosos: 0,
+      fallidos: 0,
+      errores: []
+    };
+    
+    // Procesar según el tipo
+    if (tipo.toLowerCase() === 'estudiantes') {
+      await procesarEstudiantes(data, resultados);
+    } else {
+      await procesarNotas(data, resultados);
+    }
+    
+    console.log(`✅ Proceso completado. Exitosos: ${resultados.exitosos}, Fallidos: ${resultados.fallidos}`);
+    
+    // Respuesta
+    return res.status(200).json({
+      mensaje: `Proceso de carga completado para ${tipo}`,
+      procesados: data.length,
+      resultados
+    });
+    
+  } catch (error) {
+    console.error('❌ Error en carga de Excel:', error.message);
+    return res.status(500).json({ 
+      error: 'Error al procesar el archivo Excel', 
+      detalle: error.message 
+    });
+  }
+});
+
+// Función para procesar datos de estudiantes
+async function procesarEstudiantes(data, resultados) {
+  for (const estudiante of data) {
+    try {
+      // Normalizar datos
+      const estudianteNormalizado = {
+        tipo_documento: estudiante.tipo_documento?.toString().trim(),
+        numero_documento: estudiante.numero_documento?.toString().trim(),
+        nombres: estudiante.nombres?.toString().trim(),
+        apellidos: estudiante.apellidos?.toString().trim(),
+        fecha_nacimiento: estudiante.fecha_nacimiento ? new Date(estudiante.fecha_nacimiento) : null,
+        genero: estudiante.genero?.toString().trim(),
+        email: estudiante.email?.toString().trim(),
+        telefono: estudiante.telefono?.toString().trim(),
+        direccion: estudiante.direccion?.toString().trim(),
+        ciudad: estudiante.ciudad?.toString().trim()
+      };
+      
+      // Validar datos requeridos
+      if (!estudianteNormalizado.tipo_documento || !estudianteNormalizado.numero_documento || 
+          !estudianteNormalizado.nombres || !estudianteNormalizado.apellidos || 
+          !estudianteNormalizado.email || !estudianteNormalizado.telefono) {
+        resultados.fallidos++;
+        resultados.errores.push(`Estudiante con documento ${estudianteNormalizado.numero_documento || 'desconocido'}: Faltan campos obligatorios`);
+        continue;
+      }
+      
+      // Verificar si el estudiante ya existe
+      const [existentes] = await db.promise().query(
+        'SELECT id FROM estudiantes WHERE tipo_documento = ? AND numero_documento = ?',
+        [estudianteNormalizado.tipo_documento, estudianteNormalizado.numero_documento]
+      );
+      
+      if (existentes.length > 0) {
+        // Actualizar estudiante existente
+        await db.promise().query(
+          `UPDATE estudiantes SET 
+            nombres = ?, 
+            apellidos = ?, 
+            fecha_nacimiento = ?, 
+            genero = ?, 
+            email = ?, 
+            telefono = ?, 
+            direccion = ?, 
+            ciudad = ?,
+            actualizado_en = NOW()
+          WHERE tipo_documento = ? AND numero_documento = ?`,
+          [
+            estudianteNormalizado.nombres,
+            estudianteNormalizado.apellidos,
+            estudianteNormalizado.fecha_nacimiento,
+            estudianteNormalizado.genero,
+            estudianteNormalizado.email,
+            estudianteNormalizado.telefono,
+            estudianteNormalizado.direccion,
+            estudianteNormalizado.ciudad,
+            estudianteNormalizado.tipo_documento,
+            estudianteNormalizado.numero_documento
+          ]
+        );
+        
+        console.log(`✅ Estudiante actualizado: ${estudianteNormalizado.nombres} ${estudianteNormalizado.apellidos}`);
+      } else {
+        // Insertar nuevo estudiante
+        await db.promise().query(
+          `INSERT INTO estudiantes (
+            tipo_documento, 
+            numero_documento, 
+            nombres, 
+            apellidos, 
+            fecha_nacimiento, 
+            genero, 
+            email, 
+            telefono, 
+            direccion, 
+            ciudad, 
+            creado_en
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+          [
+            estudianteNormalizado.tipo_documento,
+            estudianteNormalizado.numero_documento,
+            estudianteNormalizado.nombres,
+            estudianteNormalizado.apellidos,
+            estudianteNormalizado.fecha_nacimiento,
+            estudianteNormalizado.genero,
+            estudianteNormalizado.email,
+            estudianteNormalizado.telefono,
+            estudianteNormalizado.direccion,
+            estudianteNormalizado.ciudad
+          ]
+        );
+        
+        console.log(`✅ Nuevo estudiante creado: ${estudianteNormalizado.nombres} ${estudianteNormalizado.apellidos}`);
+      }
+      
+      resultados.exitosos++;
+      
+    } catch (error) {
+      resultados.fallidos++;
+      resultados.errores.push(`Error procesando estudiante ${estudiante.numero_documento || 'desconocido'}: ${error.message}`);
+      console.error('❌ Error:', error);
+    }
+  }
+}
+
+// Función para procesar datos de notas, programas y materias
+async function procesarNotas(data, resultados) {
+  for (const registro of data) {
+    try {
+      // Normalizar datos
+      const registroNormalizado = {
+        tipo_documento: registro.tipo_documento?.toString().trim(),
+        numero_documento: registro.numero_documento?.toString().trim(),
+        nombre_programa: registro.nombre_programa?.toString().trim(),
+        tipo_programa: registro.tipo_programa?.toString().trim(),
+        estado_programa: registro.estado_programa?.toString().trim() || 'En curso',
+        materia: registro.materia?.toString().trim(),
+        descripcion_materia: registro.descripcion_materia?.toString().trim() || '',
+        nota: parseFloat(registro.nota) || 0,
+        periodo: registro.periodo?.toString().trim()
+      };
+      
+      // Validar datos requeridos
+      if (!registroNormalizado.tipo_documento || !registroNormalizado.numero_documento || 
+          !registroNormalizado.nombre_programa || !registroNormalizado.tipo_programa || 
+          !registroNormalizado.materia || !registroNormalizado.periodo) {
+        resultados.fallidos++;
+        resultados.errores.push(`Registro con documento ${registroNormalizado.numero_documento || 'desconocido'}: Faltan campos obligatorios`);
+        continue;
+      }
+      
+      // 1. Verificar que el estudiante exista
+      const [estudiantesExistentes] = await db.promise().query(
+        'SELECT id FROM estudiantes WHERE tipo_documento = ? AND numero_documento = ?',
+        [registroNormalizado.tipo_documento, registroNormalizado.numero_documento]
+      );
+      
+      if (estudiantesExistentes.length === 0) {
+        resultados.fallidos++;
+        resultados.errores.push(
+          `Estudiante con documento ${registroNormalizado.tipo_documento}-${registroNormalizado.numero_documento} no existe en la base de datos`
+        );
+        continue;
+      }
+      
+      const estudianteId = estudiantesExistentes[0].id;
+      
+      // 2. Verificar/Crear el programa
+      let programaId;
+      const [programasExistentes] = await db.promise().query(
+        'SELECT id FROM programas WHERE nombre = ?',
+        [registroNormalizado.nombre_programa]
+      );
+      
+      if (programasExistentes.length === 0) {
+        const [resultPrograma] = await db.promise().query(
+          'INSERT INTO programas (nombre, tipo, creado_en) VALUES (?, ?, NOW())',
+          [registroNormalizado.nombre_programa, registroNormalizado.tipo_programa]
+        );
+        programaId = resultPrograma.insertId;
+        console.log(`✅ Nuevo programa creado: ${registroNormalizado.nombre_programa}`);
+      } else {
+        programaId = programasExistentes[0].id;
+      }
+      
+      // 3. Verificar/Crear relación estudiante-programa
+      let relacionId;
+      const [relacionesExistentes] = await db.promise().query(
+        'SELECT id FROM estudiante_programa WHERE estudiante_id = ? AND programa_id = ?',
+        [estudianteId, programaId]
+      );
+      
+      if (relacionesExistentes.length === 0) {
+        const [resultRelacion] = await db.promise().query(
+          'INSERT INTO estudiante_programa (estudiante_id, programa_id, estado, fecha_inicio, creado_en) VALUES (?, ?, ?, NOW(), NOW())',
+          [estudianteId, programaId, registroNormalizado.estado_programa]
+        );
+        relacionId = resultRelacion.insertId;
+        console.log(`✅ Nueva relación estudiante-programa creada`);
+      } else {
+        relacionId = relacionesExistentes[0].id;
+        // Actualizar estado si es necesario
+        await db.promise().query(
+          'UPDATE estudiante_programa SET estado = ?, actualizado_en = NOW() WHERE id = ?',
+          [registroNormalizado.estado_programa, relacionId]
+        );
+      }
+      
+      // 4. Verificar/Crear la materia
+      let materiaId;
+      const [materiasExistentes] = await db.promise().query(
+        'SELECT id FROM materias WHERE nombre = ? AND programa_id = ?',
+        [registroNormalizado.materia, programaId]
+      );
+      
+      if (materiasExistentes.length === 0) {
+        const [resultMateria] = await db.promise().query(
+          'INSERT INTO materias (nombre, descripcion, programa_id, creado_en) VALUES (?, ?, ?, NOW())',
+          [registroNormalizado.materia, registroNormalizado.descripcion_materia || registroNormalizado.materia, programaId]
+        );
+        materiaId = resultMateria.insertId;
+        console.log(`✅ Nueva materia creada: ${registroNormalizado.materia}`);
+      } else {
+        materiaId = materiasExistentes[0].id;
+      }
+      
+      // 5. Registrar la nota
+      const [notasExistentes] = await db.promise().query(
+        'SELECT id FROM estudiante_materia WHERE estudiante_id = ? AND materia_id = ? AND periodo = ?',
+        [estudianteId, materiaId, registroNormalizado.periodo]
+      );
+      
+      if (notasExistentes.length === 0) {
+        await db.promise().query(
+          'INSERT INTO estudiante_materia (estudiante_id, materia_id, nota, periodo, creado_en) VALUES (?, ?, ?, ?, NOW())',
+          [estudianteId, materiaId, registroNormalizado.nota, registroNormalizado.periodo]
+        );
+        console.log(`✅ Nueva nota registrada: ${registroNormalizado.materia} - ${registroNormalizado.nota}`);
+      } else {
+        await db.promise().query(
+          'UPDATE estudiante_materia SET nota = ?, actualizado_en = NOW() WHERE id = ?',
+          [registroNormalizado.nota, notasExistentes[0].id]
+        );
+        console.log(`✅ Nota actualizada: ${registroNormalizado.materia} - ${registroNormalizado.nota}`);
+      }
+      
+      resultados.exitosos++;
+      
+    } catch (error) {
+      resultados.fallidos++;
+      resultados.errores.push(
+        `Error procesando registro para estudiante ${registro.numero_documento || 'desconocido'}, materia ${registro.materia || 'desconocida'}: ${error.message}`
+      );
+      console.error('❌ Error:', error);
+    }
+  }
+}
+
+
+
 
 // Iniciar el sistema de notificaciones cuando arranca la aplicación
 initNotificationSystem();
