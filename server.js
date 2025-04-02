@@ -2323,7 +2323,92 @@ async function procesarNotas(data, resultados) {
 }
 
 
+// NOTAS Y PROGRAMAS // 
 
+// 📌 1. Obtener todos los estudiantes
+app.get('/api/estudiantes', (req, res) => {
+  const sql = `SELECT * FROM estudiantes ORDER BY fecha_registro DESC`;
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error('❌ Error al obtener estudiantes:', err.message);
+      return res.status(500).json({ error: 'Error al obtener estudiantes' });
+    }
+    res.json(results);
+  });
+});
+
+
+// 📌 2. Obtener todos los programas
+app.get('/api/programas', (req, res) => {
+  const sql = `SELECT * FROM programas ORDER BY nombre ASC`;
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error('❌ Error al obtener programas:', err.message);
+      return res.status(500).json({ error: 'Error al obtener programas' });
+    }
+    res.json(results);
+  });
+});
+
+// 📌 3. Obtener las notas de un estudiante por su número de documento
+app.get('/api/estudiantes/:documento/notas', async (req, res) => {
+  const { documento } = req.params;
+
+  try {
+    const [result] = await db.promise().query(`
+      SELECT e.nombres, e.apellidos, p.nombre AS programa, m.nombre AS materia, em.nota, em.periodo
+      FROM estudiantes e
+      JOIN estudiante_programa ep ON e.id_estudiante = ep.id_estudiante
+      JOIN programas p ON ep.id_programa = p.id_programa
+      JOIN estudiante_materia em ON ep.id_estudiante_programa = em.id_estudiante_programa
+      JOIN materias m ON em.id_materia = m.id_materia
+      WHERE e.numero_documento = ?
+      ORDER BY em.periodo DESC
+    `, [documento]);
+
+    if (result.length === 0) {
+      return res.status(404).json({ error: 'No se encontraron notas para este estudiante' });
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error('❌ Error al obtener notas:', err.message);
+    res.status(500).json({ error: 'Error al obtener notas del estudiante' });
+  }
+});
+
+
+// 📌 4. Obtener estudiantes asociados a un programa y sus notas
+app.get('/api/programas/:id/estudiantes', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const [result] = await db.promise().query(`
+      SELECT 
+        e.id_estudiante, e.nombres, e.apellidos, e.numero_documento,
+        m.nombre AS materia, em.periodo, em.nota
+      FROM estudiante_programa ep
+      JOIN estudiantes e ON ep.id_estudiante = e.id_estudiante
+      JOIN estudiante_materia em ON ep.id_estudiante_programa = em.id_estudiante_programa
+      JOIN materias m ON em.id_materia = m.id_materia
+      WHERE ep.id_programa = ?
+      ORDER BY e.apellidos, em.periodo
+    `, [id]);
+
+    if (result.length === 0) {
+      return res.status(404).json({ error: 'No se encontraron estudiantes asociados a este programa' });
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error('❌ Error al obtener estudiantes del programa:', err.message);
+    res.status(500).json({ error: 'Error al obtener estudiantes del programa' });
+  }
+});
+
+
+
+// FIN NOTAS Y PROGRAMAS //
 
 // Iniciar el sistema de notificaciones cuando arranca la aplicación
 initNotificationSystem();
