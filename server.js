@@ -2427,6 +2427,36 @@ app.get('/api/programas/:id/materias', async (req, res) => {
   }
 });
 
+// 📌 6. Obtener estudiantes asociados a una materia
+app.get('/api/materias/:id/estudiantes', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [result] = await db.promise().query(`
+      SELECT 
+        e.id_estudiante,
+        e.nombres,
+        e.apellidos,
+        e.numero_documento,
+        em.nota,
+        em.periodo
+      FROM estudiante_materia em
+      JOIN estudiante_programa ep ON em.id_estudiante_programa = ep.id_estudiante_programa
+      JOIN estudiantes e ON ep.id_estudiante = e.id_estudiante
+      WHERE em.id_materia = ?
+      ORDER BY e.apellidos, em.periodo
+    `, [id]);
+
+    if (result.length === 0) {
+      return res.status(404).json({ error: 'No se encontraron estudiantes para esta materia' });
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error('❌ Error al obtener estudiantes para la materia:', err.message);
+    res.status(500).json({ error: 'Error al obtener estudiantes para la materia' });
+  }
+});
+
 
 
 // FIN NOTAS Y PROGRAMAS //
