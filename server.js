@@ -2406,6 +2406,27 @@ app.get('/api/programas/:id/estudiantes', async (req, res) => {
   }
 });
 
+// 📌 5. Obtener materias asociadas a un programa
+app.get('/api/programas/:id/materias', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [result] = await db.promise().query(`
+      SELECT * FROM materias 
+      WHERE id_programa = ?
+      ORDER BY nombre ASC
+    `, [id]);
+
+    if (result.length === 0) {
+      return res.status(404).json({ error: 'No se encontraron materias para este programa' });
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error('❌ Error al obtener materias para el programa:', err.message);
+    res.status(500).json({ error: 'Error al obtener materias del programa' });
+  }
+});
+
 
 
 // FIN NOTAS Y PROGRAMAS //
