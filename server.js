@@ -2447,10 +2447,10 @@ app.get('/api/estudiantes', (req, res) => {
   });
 });
 
-
-// 📌 2. Obtener todos los programas
+// 📌 2. Obtener todos los programas (actualizado)
+// Se ordena por Nombre_programa, que es el campo de la nueva tabla
 app.get('/api/programas', (req, res) => {
-  const sql = `SELECT * FROM programas ORDER BY nombre ASC`;
+  const sql = `SELECT * FROM programas ORDER BY Nombre_programa ASC`;
   db.query(sql, (err, results) => {
     if (err) {
       console.error('❌ Error al obtener programas:', err.message);
@@ -2460,85 +2460,125 @@ app.get('/api/programas', (req, res) => {
   });
 });
 
-// 📌 3. Obtener las notas de un estudiante por su número de documento
-app.get('/api/estudiantes/:documento/notas', async (req, res) => {
+// 📌 3. Obtener la asignación (programas, módulos, asignaturas y notas) de un estudiante por su número de documento
+app.get('/api/estudiantes/:documento/asignaciones', async (req, res) => {
   const { documento } = req.params;
 
   try {
     const [result] = await db.promise().query(`
-      SELECT e.nombres, e.apellidos, p.nombre AS programa, m.nombre AS materia, em.nota, em.periodo
+      SELECT 
+        e.id_estudiante,
+        e.nombres,
+        e.apellidos,
+        e.numero_documento,
+        p.Id_Programa,
+        p.Nombre_programa,
+        p.Estado,
+        p.Fecha_Inicio_programa,
+        p.Fecha_Fin_programa,
+        a.Id_Asignatura,
+        a.Nombre_asignatura,
+        a.Id_Modulo,
+        m.Nombre_modulo,
+        m.Fecha_Inicio_modulo,
+        m.Fecha_Fin_modulo,
+        n.Nota_Final,
+        n.Id_nota
       FROM estudiantes e
-      JOIN estudiante_programa ep ON e.id_estudiante = ep.id_estudiante
-      JOIN programas p ON ep.id_programa = p.id_programa
-      JOIN estudiante_materia em ON ep.id_estudiante_programa = em.id_estudiante_programa
-      JOIN materias m ON em.id_materia = m.id_materia
+      JOIN programas p ON e.id_estudiante = p.Id_Estudiante
+      JOIN asignaturas a ON p.Id_Programa = a.Id_Programa
+      LEFT JOIN modulos m ON a.Id_Modulo = m.Id_Modulo
+      LEFT JOIN notas n ON a.Id_Asignatura = n.Id_Asignatura
       WHERE e.numero_documento = ?
-      ORDER BY em.periodo DESC
+      ORDER BY p.Nombre_programa, m.Nombre_modulo, a.Nombre_asignatura
     `, [documento]);
 
     if (result.length === 0) {
-      return res.status(404).json({ error: 'No se encontraron notas para este estudiante' });
+      return res.status(404).json({ error: 'No se encontraron asignaciones para este estudiante' });
     }
 
     res.json(result);
   } catch (err) {
-    console.error('❌ Error al obtener notas:', err.message);
-    res.status(500).json({ error: 'Error al obtener notas del estudiante' });
+    console.error('❌ Error al obtener asignaciones:', err.message);
+    res.status(500).json({ error: 'Error al obtener asignaciones del estudiante' });
   }
 });
 
-
-// 📌 4. Obtener estudiantes asociados a un programa y sus notas
+// 📌 4. Obtener estudiantes y sus asignaciones (asignaturas, módulos y notas) asociados a un programa
 app.get('/api/programas/:id/estudiantes', async (req, res) => {
   const { id } = req.params;
 
   try {
     const [result] = await db.promise().query(`
       SELECT 
-        e.id_estudiante, e.nombres, e.apellidos, e.numero_documento,
-        m.nombre AS materia, em.periodo, em.nota
-      FROM estudiante_programa ep
-      JOIN estudiantes e ON ep.id_estudiante = e.id_estudiante
-      JOIN estudiante_materia em ON ep.id_estudiante_programa = em.id_estudiante_programa
-      JOIN materias m ON em.id_materia = m.id_materia
-      WHERE ep.id_programa = ?
-      ORDER BY e.apellidos, em.periodo
+        e.id_estudiante,
+        e.nombres,
+        e.apellidos,
+        e.numero_documento,
+        p.Id_Programa,
+        p.Nombre_programa,
+        p.Estado,
+        p.Fecha_Inicio_programa,
+        p.Fecha_Fin_programa,
+        a.Id_Asignatura,
+        a.Nombre_asignatura,
+        a.Id_Modulo,
+        m.Nombre_modulo,
+        m.Fecha_Inicio_modulo,
+        m.Fecha_Fin_modulo,
+        n.Nota_Final,
+        n.Id_nota
+      FROM programas p
+      JOIN estudiantes e ON p.Id_Estudiante = e.id_estudiante
+      JOIN asignaturas a ON p.Id_Programa = a.Id_Programa
+      LEFT JOIN modulos m ON a.Id_Modulo = m.Id_Modulo
+      LEFT JOIN notas n ON a.Id_Asignatura = n.Id_Asignatura
+      WHERE p.Id_Programa = ?
+      ORDER BY e.apellidos, m.Nombre_modulo, a.Nombre_asignatura
     `, [id]);
 
     if (result.length === 0) {
-      return res.status(404).json({ error: 'No se encontraron estudiantes asociados a este programa' });
+      return res.status(404).json({ error: 'No se encontraron estudiantes asignados a este programa' });
     }
 
     res.json(result);
   } catch (err) {
-    console.error('❌ Error al obtener estudiantes del programa:', err.message);
-    res.status(500).json({ error: 'Error al obtener estudiantes del programa' });
+    console.error('❌ Error al obtener asignaciones de estudiantes para el programa:', err.message);
+    res.status(500).json({ error: 'Error al obtener asignaciones de estudiantes del programa' });
   }
 });
 
-// 📌 5. Obtener materias asociadas a un programa
-app.get('/api/programas/:id/materias', async (req, res) => {
+// 📌 5. Obtener las asignaturas (y módulos, si las tienen) asociadas a un programa
+app.get('/api/programas/:id/asignaturas', async (req, res) => {
   const { id } = req.params;
   try {
     const [result] = await db.promise().query(`
-      SELECT * FROM materias 
-      WHERE id_programa = ?
-      ORDER BY nombre ASC
+      SELECT 
+        a.Id_Asignatura,
+        a.Nombre_asignatura,
+        a.Id_Modulo,
+        m.Nombre_modulo,
+        m.Fecha_Inicio_modulo,
+        m.Fecha_Fin_modulo
+      FROM asignaturas a
+      LEFT JOIN modulos m ON a.Id_Modulo = m.Id_Modulo
+      WHERE a.Id_Programa = ?
+      ORDER BY a.Nombre_asignatura
     `, [id]);
 
     if (result.length === 0) {
-      return res.status(404).json({ error: 'No se encontraron materias para este programa' });
+      return res.status(404).json({ error: 'No se encontraron asignaturas para este programa' });
     }
 
     res.json(result);
   } catch (err) {
-    console.error('❌ Error al obtener materias para el programa:', err.message);
-    res.status(500).json({ error: 'Error al obtener materias del programa' });
+    console.error('❌ Error al obtener asignaturas para el programa:', err.message);
+    res.status(500).json({ error: 'Error al obtener asignaturas del programa' });
   }
 });
 
-// 📌 6. Obtener estudiantes asociados a una materia
-app.get('/api/materias/:id/estudiantes', async (req, res) => {
+// 📌 6. Obtener los estudiantes asociados a una asignatura (incluyendo su nota) 
+app.get('/api/asignaturas/:id/estudiantes', async (req, res) => {
   const { id } = req.params;
   try {
     const [result] = await db.promise().query(`
@@ -2547,26 +2587,28 @@ app.get('/api/materias/:id/estudiantes', async (req, res) => {
         e.nombres,
         e.apellidos,
         e.numero_documento,
-        em.nota,
-        em.periodo
-      FROM estudiante_materia em
-      JOIN estudiante_programa ep ON em.id_estudiante_programa = ep.id_estudiante_programa
-      JOIN estudiantes e ON ep.id_estudiante = e.id_estudiante
-      WHERE em.id_materia = ?
-      ORDER BY e.apellidos, em.periodo
+        p.Nombre_programa,
+        p.Estado,
+        n.Nota_Final,
+        n.Id_nota
+      FROM asignaturas a
+      JOIN programas p ON a.Id_Programa = p.Id_Programa
+      JOIN estudiantes e ON p.Id_Estudiante = e.id_estudiante
+      LEFT JOIN notas n ON a.Id_Asignatura = n.Id_Asignatura
+      WHERE a.Id_Asignatura = ?
+      ORDER BY e.apellidos
     `, [id]);
 
     if (result.length === 0) {
-      return res.status(404).json({ error: 'No se encontraron estudiantes para esta materia' });
+      return res.status(404).json({ error: 'No se encontraron estudiantes para esta asignatura' });
     }
 
     res.json(result);
   } catch (err) {
-    console.error('❌ Error al obtener estudiantes para la materia:', err.message);
-    res.status(500).json({ error: 'Error al obtener estudiantes para la materia' });
+    console.error('❌ Error al obtener estudiantes para la asignatura:', err.message);
+    res.status(500).json({ error: 'Error al obtener estudiantes para la asignatura' });
   }
 });
-
 
 
 // FIN NOTAS Y PROGRAMAS //
