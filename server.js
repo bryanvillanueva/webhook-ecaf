@@ -2188,249 +2188,158 @@ async function procesarEstudiantes(data, resultados) {
   }
 }
 
-/**
- * Procesa la información proveniente de un Excel.
- * @param {Array} data - Arreglo de objetos que representan cada fila del Excel.
- * @param {Object} resultados - Objeto para llevar contadores de éxitos, fallos y mensajes de error.
- */
-async function procesarExcel(data, resultados) {
+
+// Función para procesar datos de notas, programas y materias
+async function procesarNotas(data, resultados) {
   for (const registro of data) {
     try {
-      // 1. Normalizar datos
+      // Normalizar datos
       const registroNormalizado = {
-        tipo_documento: (registro.tipo_documento || '').toString().trim(),
-        numero_documento: (registro.numero_documento || '').toString().trim(),
-        nombre_programa: (registro.nombre_programa || '').toString().trim(),
-        incluye_modulos: parseInt(registro['Incluye modulos?'], 10) === 1, // 1 -> true, 0 -> false
-        fecha_inicio_programa: registro['Fecha de Inicio'] ? new Date(registro['Fecha de Inicio']) : null,
-        fecha_fin_programa: registro['Fecha de finalizacion'] ? new Date(registro['Fecha de finalizacion']) : null,
-        estado_programa: (registro.Estado || '').toString().trim() || 'En curso',
-        tipo_de_formacion: (registro['tipo de formacion'] || '').toString().trim(),
-        nombre_modulo: (registro['Nombre del modulo'] || '').toString().trim(),
-        fecha_inicio_modulo: registro['fecha de Inicio Modulo'] ? new Date(registro['fecha de Inicio Modulo']) : null,
-        fecha_fin_modulo: registro['Fecha de finalizacion Modulo'] ? new Date(registro['Fecha de finalizacion Modulo']) : null,
-        nombre_asignatura: (registro['Nombre de la Asignatura'] || '').toString().trim(),
-        nota_final: parseFloat(registro['Nota Final']) || 0
+        tipo_documento: registro.tipo_documento?.toString().trim().toUpperCase(),
+        numero_documento: registro.numero_documento?.toString().trim(),
+        nombre_programa: registro.nombre_programa?.toString().trim().toUpperCase(),
+        tipo_programa: registro.tipo_programa?.toString().trim().toUpperCase() || 'CERTIFICACION',
+        estado_programa: registro.estado_programa?.toString().trim().toUpperCase() || 'EN CURSO',
+        materia: registro.materia?.toString().trim().toUpperCase(),
+        descripcion_materia: registro.descripcion_materia?.toString().trim() || '',
+        nota: parseFloat(registro.nota) || 0,
+        periodo: registro.periodo?.toString().trim().toUpperCase()
       };
-
-      // 2. Validar campos mínimos requeridos
-      if (
-        !registroNormalizado.tipo_documento ||
-        !registroNormalizado.numero_documento ||
-        !registroNormalizado.nombre_programa ||
-        !registroNormalizado.nombre_asignatura
-      ) {
+      
+      // Validar datos requeridos
+      if (!registroNormalizado.tipo_documento || !registroNormalizado.numero_documento || 
+          !registroNormalizado.nombre_programa || !registroNormalizado.materia || 
+          !registroNormalizado.periodo) {
         resultados.fallidos++;
-        resultados.errores.push(
-          `Fila con documento ${registroNormalizado.numero_documento || 'desconocido'}: faltan campos obligatorios.`
-        );
+        resultados.errores.push(`Registro con documento ${registroNormalizado.numero_documento || 'desconocido'}: Faltan campos obligatorios`);
         continue;
       }
-
-      // 3. Verificar que el estudiante exista
-      const [estudiantes] = await db.promise().query(
-        'SELECT Id_Estudiante FROM estudiantes WHERE tipo_documento = ? AND numero_documento = ?',
+      
+      // 1. Verificar que el estudiante exista
+      const [estudiantesExistentes] = await db.promise().query(
+        'SELECT id_estudiante FROM estudiantes WHERE tipo_documento = ? AND numero_documento = ?',
         [registroNormalizado.tipo_documento, registroNormalizado.numero_documento]
       );
-      if (estudiantes.length === 0) {
+      
+      if (estudiantesExistentes.length === 0) {
         resultados.fallidos++;
         resultados.errores.push(
-          `No existe el estudiante con documento ${registroNormalizado.tipo_documento}-${registroNormalizado.numero_documento}.`
+          `Estudiante con documento ${registroNormalizado.tipo_documento}-${registroNormalizado.numero_documento} no existe en la base de datos`
         );
         continue;
       }
-      const idEstudiante = estudiantes[0].Id_Estudiante;
-
-      // 4. Crear o recuperar el programa, asociado al estudiante
-      let idPrograma;
-      const [programas] = await db.promise().query(
-        `SELECT Id_Programa
-         FROM programas
-         WHERE Nombre_programa = ? AND Id_Estudiante = ?`,
-        [registroNormalizado.nombre_programa, idEstudiante]
+      
+      const estudianteId = estudiantesExistentes[0].id_estudiante;
+      
+      // 2. Verificar/Crear el programa (usando la nueva estructura)
+      let programaId;
+      const [programasExistentes] = await db.promise().query(
+        'SELECT Id_Programa FROM programas WHERE Nombre_programa = ?',
+        [registroNormalizado.nombre_programa]
       );
-
-      if (programas.length === 0) {
+      
+      if (programasExistentes.length === 0) {
+        // Crear nuevo programa
         const [resultPrograma] = await db.promise().query(
-          `INSERT INTO programas (
-             Nombre_programa,
-             Incluye_Modulos,
-             Fecha_Inicio_programa,
-             Fecha_Fin_programa,
-             Estado,
-             Id_Estudiante
-           ) VALUES (?, ?, ?, ?, ?, ?)`,
-          [
-            registroNormalizado.nombre_programa,
-            registroNormalizado.incluye_modulos,
-            registroNormalizado.fecha_inicio_programa,
-            registroNormalizado.fecha_fin_programa,
-            registroNormalizado.estado_programa,
-            idEstudiante
-          ]
+          'INSERT INTO programas (Nombre_programa, Incluye_Modulos, Estado) VALUES (?, ?, ?)',
+          [registroNormalizado.nombre_programa, 1, 'ACTIVO']
         );
-        idPrograma = resultPrograma.insertId;
+        programaId = resultPrograma.insertId;
         console.log(`✅ Nuevo programa creado: ${registroNormalizado.nombre_programa}`);
       } else {
-        idPrograma = programas[0].Id_Programa;
-        // (Opcional) Actualizar campos del programa si quieres sincronizar datos
+        programaId = programasExistentes[0].Id_Programa;
+      }
+      
+      // 3. Verificar/Crear relación estudiante-programa (nueva tabla puente)
+      const [relacionesExistentes] = await db.promise().query(
+        'SELECT * FROM estudiante_programa WHERE Id_Estudiante = ? AND Id_Programa = ?',
+        [estudianteId, programaId]
+      );
+      
+      if (relacionesExistentes.length === 0) {
+        // Crear nueva relación
         await db.promise().query(
-          `UPDATE programas
-           SET Incluye_Modulos = ?,
-               Fecha_Inicio_programa = ?,
-               Fecha_Fin_programa = ?,
-               Estado = ?
-           WHERE Id_Programa = ?`,
-          [
-            registroNormalizado.incluye_modulos,
-            registroNormalizado.fecha_inicio_programa,
-            registroNormalizado.fecha_fin_programa,
-            registroNormalizado.estado_programa,
-            idPrograma
-          ]
+          'INSERT INTO estudiante_programa (Id_Estudiante, Id_Programa, Estado, Fecha_Inicio) VALUES (?, ?, ?, CURDATE())',
+          [estudianteId, programaId, registroNormalizado.estado_programa]
+        );
+        console.log(`✅ Nueva relación estudiante-programa creada`);
+      } else {
+        // Actualizar estado si es necesario
+        await db.promise().query(
+          'UPDATE estudiante_programa SET Estado = ? WHERE Id_Estudiante = ? AND Id_Programa = ?',
+          [registroNormalizado.estado_programa, estudianteId, programaId]
         );
       }
-
-      // 5. Crear o recuperar el tipo_programa, si aplica
-      //    (ej. si "tipo_de_formacion" = "Formacion Complementaria" o cualquier valor que decidas relacionar)
-      if (registroNormalizado.tipo_de_formacion) {
-        // Verificamos si existe en tipo_programa
-        let idTipoPrograma;
-        const [tiposPrograma] = await db.promise().query(
-          `SELECT Id_tipo_programa
-           FROM tipo_programa
-           WHERE Nombre_tipo_programa = ? AND Id_Programa = ?`,
-          [registroNormalizado.tipo_de_formacion, idPrograma]
+      
+      // 4. Verificar/Crear el módulo (si aplica)
+      let moduloId = null;
+      if (registroNormalizado.modulo) {
+        const [modulosExistentes] = await db.promise().query(
+          'SELECT Id_Modulo FROM modulos WHERE Nombre_modulo = ? AND Id_Programa = ?',
+          [registroNormalizado.modulo.toUpperCase(), programaId]
         );
-
-        if (tiposPrograma.length === 0) {
-          const [resultTipo] = await db.promise().query(
-            `INSERT INTO tipo_programa (Nombre_tipo_programa, Id_Programa)
-             VALUES (?, ?)`,
-            [registroNormalizado.tipo_de_formacion, idPrograma]
-          );
-          idTipoPrograma = resultTipo.insertId;
-          console.log(`✅ Nuevo tipo_programa creado: ${registroNormalizado.tipo_de_formacion}`);
-        } else {
-          idTipoPrograma = tiposPrograma[0].Id_tipo_programa;
-        }
-        // Si quisieras guardar notas directamente a tipo_programa,
-        // aquí podrías manejarlo con la tabla notas y su campo Id_tipo_programa.
-      }
-
-      // 6. Crear o recuperar el módulo, si Incluye_Modulos = true y hay nombre_modulo
-      let idModulo = null;
-      if (registroNormalizado.incluye_modulos && registroNormalizado.nombre_modulo) {
-        const [modulos] = await db.promise().query(
-          `SELECT Id_Modulo
-           FROM modulos
-           WHERE Nombre_modulo = ? AND Id_Programa = ?`,
-          [registroNormalizado.nombre_modulo, idPrograma]
-        );
-
-        if (modulos.length === 0) {
+        
+        if (modulosExistentes.length === 0) {
           const [resultModulo] = await db.promise().query(
-            `INSERT INTO modulos (
-               Nombre_modulo,
-               Fecha_Inicio_modulo,
-               Fecha_Fin_modulo,
-               Id_Programa
-             ) VALUES (?, ?, ?, ?)`,
-            [
-              registroNormalizado.nombre_modulo,
-              registroNormalizado.fecha_inicio_modulo,
-              registroNormalizado.fecha_fin_modulo,
-              idPrograma
-            ]
+            'INSERT INTO modulos (Nombre_modulo, Id_Programa) VALUES (?, ?)',
+            [registroNormalizado.modulo.toUpperCase(), programaId]
           );
-          idModulo = resultModulo.insertId;
-          console.log(`✅ Nuevo módulo creado: ${registroNormalizado.nombre_modulo}`);
+          moduloId = resultModulo.insertId;
+          console.log(`✅ Nuevo módulo creado: ${registroNormalizado.modulo}`);
         } else {
-          idModulo = modulos[0].Id_Modulo;
-          // (Opcional) Actualizar datos del módulo
-          await db.promise().query(
-            `UPDATE modulos
-             SET Fecha_Inicio_modulo = ?,
-                 Fecha_Fin_modulo = ?
-             WHERE Id_Modulo = ?`,
-            [registroNormalizado.fecha_inicio_modulo, registroNormalizado.fecha_fin_modulo, idModulo]
-          );
+          moduloId = modulosExistentes[0].Id_Modulo;
         }
       }
-
-      // 7. Crear o recuperar la asignatura (relacionada al programa y/o módulo)
-      let idAsignatura;
-      const [asignaturas] = await db.promise().query(
-        `SELECT Id_Asignatura
-         FROM asignaturas
-         WHERE Nombre_asignatura = ?
-           AND Id_Programa = ?
-           AND (
-                (Id_Modulo = ?)
-                OR (Id_Modulo IS NULL AND ? IS NULL)
-               )`,
-        [
-          registroNormalizado.nombre_asignatura,
-          idPrograma,
-          idModulo,
-          idModulo
-        ]
+      
+      // 5. Verificar/Crear la asignatura (materia)
+      let asignaturaId;
+      const [asignaturasExistentes] = await db.promise().query(
+        'SELECT Id_Asignatura FROM asignaturas WHERE Nombre_asignatura = ? AND Id_Programa = ?',
+        [registroNormalizado.materia, programaId]
       );
-
-      if (asignaturas.length === 0) {
-        const [resultAsig] = await db.promise().query(
-          `INSERT INTO asignaturas (
-             Nombre_asignatura,
-             Id_Programa,
-             Id_Modulo
-           ) VALUES (?, ?, ?)`,
-          [registroNormalizado.nombre_asignatura, idPrograma, idModulo]
+      
+      if (asignaturasExistentes.length === 0) {
+        const [resultAsignatura] = await db.promise().query(
+          'INSERT INTO asignaturas (Nombre_asignatura, Id_Programa, Id_Modulo) VALUES (?, ?, ?)',
+          [registroNormalizado.materia, programaId, moduloId]
         );
-        idAsignatura = resultAsig.insertId;
-        console.log(`✅ Nueva asignatura creada: ${registroNormalizado.nombre_asignatura}`);
+        asignaturaId = resultAsignatura.insertId;
+        console.log(`✅ Nueva asignatura creada: ${registroNormalizado.materia}`);
       } else {
-        idAsignatura = asignaturas[0].Id_Asignatura;
+        asignaturaId = asignaturasExistentes[0].Id_Asignatura;
       }
-
-      // 8. Registrar o actualizar la nota para la asignatura (tabla notas)
-      //    (Si deseas manejar notas para el tipo_programa, deberías análogamente usar Id_tipo_programa)
-      const [notas] = await db.promise().query(
-        `SELECT Id_nota
-         FROM notas
-         WHERE Id_Asignatura = ?`,
-        [idAsignatura]
+      
+      // 6. Registrar la nota (adaptado a nueva estructura)
+      const [notasExistentes] = await db.promise().query(
+        'SELECT Id_nota FROM notas WHERE Id_Asignatura = ? AND Id_Estudiante = ?',
+        [asignaturaId, estudianteId]
       );
-
-      if (notas.length === 0) {
+      
+      if (notasExistentes.length === 0) {
         await db.promise().query(
-          `INSERT INTO notas (Nota_Final, Id_Asignatura)
-           VALUES (?, ?)`,
-          [registroNormalizado.nota_final, idAsignatura]
+          'INSERT INTO notas (Nota_Final, Id_Asignatura, Id_Estudiante) VALUES (?, ?, ?)',
+          [registroNormalizado.nota, asignaturaId, estudianteId]
         );
-        console.log(`✅ Nota registrada: ${registroNormalizado.nombre_asignatura} - ${registroNormalizado.nota_final}`);
+        console.log(`✅ Nueva nota registrada: ${registroNormalizado.materia} - ${registroNormalizado.nota}`);
       } else {
         await db.promise().query(
-          `UPDATE notas
-           SET Nota_Final = ?
-           WHERE Id_nota = ?`,
-          [registroNormalizado.nota_final, notas[0].Id_nota]
+          'UPDATE notas SET Nota_Final = ? WHERE Id_nota = ?',
+          [registroNormalizado.nota, notasExistentes[0].Id_nota]
         );
-        console.log(`✅ Nota actualizada: ${registroNormalizado.nombre_asignatura} - ${registroNormalizado.nota_final}`);
+        console.log(`✅ Nota actualizada: ${registroNormalizado.materia} - ${registroNormalizado.nota}`);
       }
-
+      
       resultados.exitosos++;
+      
     } catch (error) {
       resultados.fallidos++;
       resultados.errores.push(
-        `Error procesando registro para estudiante ${
-          registro.numero_documento || 'desconocido'
-        }, programa "${registro.nombre_programa}": ${error.message}`
+        `Error procesando registro para documento ${registro.numero_documento || 'desconocido'}, materia ${registro.materia || 'desconocida'}: ${error.message}`
       );
       console.error('❌ Error:', error);
     }
   }
 }
-
 
 
 // NOTAS Y PROGRAMAS // 
