@@ -2193,7 +2193,7 @@ async function procesarEstudiantes(data, resultados) {
 async function procesarNotas(data, resultados) {
   for (const registro of data) {
     try {
-      // 1. Normalizar datos (usando nombres de campos del Excel como en endpoint 5)
+      // 1. Normalizar datos (usando nombres de campos del Excel)
       const registroNormalizado = {
         tipo_documento: (registro.tipo_documento || '').toString().trim(),
         numero_documento: (registro.numero_documento || '').toString().trim(),
@@ -2240,7 +2240,7 @@ async function procesarNotas(data, resultados) {
       
       const estudianteId = estudiantesExistentes[0].id_estudiante;
       
-      // 4. Verificar/Crear el programa (sin asociar directamente al estudiante)
+      // 4. Verificar/Crear el programa
       let programaId;
       const [programasExistentes] = await db.promise().query(
         'SELECT Id_Programa FROM programas WHERE Nombre_programa = ?',
@@ -2287,30 +2287,30 @@ async function procesarNotas(data, resultados) {
         );
       }
       
-      // 5. Verificar/Crear relación estudiante-programa (tabla intermedia)
+      // 5. Verificar/Crear relación estudiante-programa
       const [relacionesExistentes] = await db.promise().query(
-        'SELECT * FROM estudiante_programa WHERE Id_Estudiante = ? AND Id_Programa = ?',
+        'SELECT * FROM estudiante_programa WHERE id_estudiante = ? AND Id_Programa = ?',
         [estudianteId, programaId]
       );
       
       if (relacionesExistentes.length === 0) {
         // Crear nueva relación
         await db.promise().query(
-          'INSERT INTO estudiante_programa (Id_Estudiante, Id_Programa, Estado, Fecha_Inicio) VALUES (?, ?, ?, ?)',
+          'INSERT INTO estudiante_programa (id_estudiante, Id_Programa, Estado, Fecha_Inicio) VALUES (?, ?, ?, ?)',
           [estudianteId, programaId, registroNormalizado.estado_programa, registroNormalizado.fecha_inicio_programa]
         );
         console.log(`✅ Nueva relación estudiante-programa creada`);
       } else {
         // Actualizar estado y fechas si es necesario
         await db.promise().query(
-          'UPDATE estudiante_programa SET Estado = ?, Fecha_Inicio = ? WHERE Id_Estudiante = ? AND Id_Programa = ?',
+          'UPDATE estudiante_programa SET Estado = ?, Fecha_Inicio = ? WHERE id_estudiante = ? AND Id_Programa = ?',
           [registroNormalizado.estado_programa, registroNormalizado.fecha_inicio_programa, estudianteId, programaId]
         );
       }
 
       // 6. Crear o recuperar el tipo_programa
+      let idTipoPrograma = null;
       if (registroNormalizado.tipo_de_formacion) {
-        let idTipoPrograma;
         const [tiposPrograma] = await db.promise().query(
           'SELECT Id_tipo_programa FROM tipo_programa WHERE Nombre_tipo_programa = ? AND Id_Programa = ?',
           [registroNormalizado.tipo_de_formacion, programaId]
@@ -2396,22 +2396,22 @@ async function procesarNotas(data, resultados) {
         asignaturaId = asignaturasExistentes[0].Id_Asignatura;
       }
       
-      // 9. Registrar la nota (manteniendo la relación con estudiante)
+      // 9. Registrar la nota (según la estructura real de la tabla)
       const [notasExistentes] = await db.promise().query(
-        'SELECT Id_nota FROM notas WHERE Id_Asignatura = ? AND Id_Estudiante = ?',
-        [asignaturaId, estudianteId]
+        'SELECT Id_nota FROM notas WHERE Id_Asignatura = ?',
+        [asignaturaId]
       );
       
       if (notasExistentes.length === 0) {
         await db.promise().query(
-          'INSERT INTO notas (Nota_Final, Id_Asignatura, Id_Estudiante) VALUES (?, ?, ?)',
-          [registroNormalizado.nota_final, asignaturaId, estudianteId]
+          'INSERT INTO notas (Nota_Final, Id_Asignatura, Id_tipo_programa) VALUES (?, ?, ?)',
+          [registroNormalizado.nota_final, asignaturaId, idTipoPrograma]
         );
         console.log(`✅ Nueva nota registrada: ${registroNormalizado.nombre_asignatura} - ${registroNormalizado.nota_final}`);
       } else {
         await db.promise().query(
-          'UPDATE notas SET Nota_Final = ? WHERE Id_nota = ?',
-          [registroNormalizado.nota_final, notasExistentes[0].Id_nota]
+          'UPDATE notas SET Nota_Final = ?, Id_tipo_programa = ? WHERE Id_nota = ?',
+          [registroNormalizado.nota_final, idTipoPrograma, notasExistentes[0].Id_nota]
         );
         console.log(`✅ Nota actualizada: ${registroNormalizado.nombre_asignatura} - ${registroNormalizado.nota_final}`);
       }
@@ -2429,7 +2429,6 @@ async function procesarNotas(data, resultados) {
     }
   }
 }
-
 
 // NOTAS Y PROGRAMAS // 
 
