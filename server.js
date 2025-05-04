@@ -2060,12 +2060,12 @@ app.post('/api/cargar-excel', excelUpload.single('archivo'), async (req, res) =>
       errores: []
     };
     
-    // Procesar según el tipo
-    if (tipo.toLowerCase() === 'estudiantes') {
-      await procesarEstudiantes(data, resultados);
-    } else {
-      await procesarExcel(data, resultados);
-    }
+// Procesar según el tipo
+if (tipo.toLowerCase() === 'estudiantes') {
+  await procesarEstudiantes(data, resultados);
+} else {
+  await procesarNotas(data, resultados); 
+}
     
     console.log(`✅ Proceso completado. Exitosos: ${resultados.exitosos}, Fallidos: ${resultados.fallidos}`);
     
