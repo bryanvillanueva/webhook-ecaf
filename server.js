@@ -2656,34 +2656,61 @@ app.get('/api/modulos/:id/estudiantes', async (req, res) => {
   const { id } = req.params;
 
   try {
+    // Primero obtenemos los estudiantes y sus asignaturas en el módulo
     const [result] = await db.promise().query(`
       SELECT 
+        e.id_estudiante,
         e.numero_documento,
+        e.tipo_documento,
         e.nombres,
         e.apellidos,
         e.email,
+        a.Id_Asignatura,
         a.Nombre_asignatura,
-        m.Id_Modulo
+        m.Id_Modulo,
+        m.Nombre_modulo
       FROM estudiante_programa ep
       JOIN estudiantes e ON ep.id_estudiante = e.id_estudiante
       JOIN programas p ON ep.Id_Programa = p.Id_Programa
       JOIN asignaturas a ON a.Id_Programa = p.Id_Programa
       JOIN modulos m ON a.Id_Modulo = m.Id_Modulo
       WHERE m.Id_Modulo = ?
-      ORDER BY e.apellidos, a.Nombre_asignatura
+      ORDER BY e.apellidos, e.nombres, a.Nombre_asignatura
     `, [id]);
 
     if (result.length === 0) {
       return res.status(404).json({ error: 'No se encontraron estudiantes en este módulo' });
     }
 
-    res.json(result);
+    // Agrupamos los resultados por estudiante
+    const estudiantesAgrupados = {};
+    result.forEach(row => {
+      if (!estudiantesAgrupados[row.id_estudiante]) {
+        estudiantesAgrupados[row.id_estudiante] = {
+          id_estudiante: row.id_estudiante,
+          numero_documento: row.numero_documento,
+          tipo_documento: row.tipo_documento,
+          nombres: row.nombres,
+          apellidos: row.apellidos,
+          email: row.email,
+          asignaturas: []
+        };
+      }
+      
+      if (row.Id_Asignatura) {
+        estudiantesAgrupados[row.id_estudiante].asignaturas.push({
+          Id_Asignatura: row.Id_Asignatura,
+          Nombre_asignatura: row.Nombre_asignatura
+        });
+      }
+    });
+
+    res.json(Object.values(estudiantesAgrupados));
   } catch (err) {
     console.error('❌ Error al obtener estudiantes del módulo:', err.message);
     res.status(500).json({ error: 'Error al obtener estudiantes del módulo' });
   }
 });
-
 
 
 // FIN NOTAS Y PROGRAMAS //
