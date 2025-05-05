@@ -2519,37 +2519,37 @@ app.get('/api/programas/:id/estudiantes', async (req, res) => {
   try {
     const [result] = await db.promise().query(`
        SELECT 
-        e.id_estudiante,
-        e.nombres,
-        e.apellidos,
-        e.numero_documento,
-        p.Id_Programa,
-        p.Nombre_programa,
-        p.Estado        AS Estado_programa,
-        p.Fecha_Inicio_programa,
-        p.Fecha_Fin_programa,
-        a.Id_Asignatura,
-        a.Nombre_asignatura,
-        a.Id_Modulo,
-        m.Nombre_modulo,
-        m.Fecha_Inicio_modulo,
-        m.Fecha_Fin_modulo,
-        n.Nota_Final,
-        n.Id_nota
-      FROM estudiante_programa ep
-      JOIN estudiantes e 
-        ON ep.id_estudiante = e.id_estudiante
-      JOIN programas p 
-        ON ep.Id_Programa   = p.Id_Programa
-      JOIN asignaturas a 
-        ON a.Id_Programa    = p.Id_Programa
-      LEFT JOIN modulos m 
-        ON a.Id_Modulo     = m.Id_Modulo
-      LEFT JOIN notas n 
-        ON n.Id_Asignatura = a.Id_Asignatura
-       AND n.id_estudiante = e.id_estudiante
-      WHERE ep.Id_Programa = ?
-      ORDER BY e.apellidos, m.Nombre_modulo, a.Nombre_asignatura
+    e.id_estudiante,
+    e.nombres,
+    e.apellidos,
+    e.numero_documento,
+    p.Id_Programa,
+    p.Nombre_programa,
+    p.Estado AS Estado_programa,
+    p.Fecha_Inicio_programa,
+    p.Fecha_Fin_programa,
+    m.Id_Modulo,
+    m.Nombre_modulo,
+    m.Fecha_Inicio_modulo,
+    m.Fecha_Fin_modulo,
+    n.Nota_Final,
+    n.Id_nota
+FROM estudiante_programa ep
+JOIN estudiantes e 
+    ON ep.id_estudiante = e.id_estudiante
+JOIN programas p 
+    ON ep.Id_Programa = p.Id_Programa
+JOIN asignaturas a 
+    ON a.Id_Programa = p.Id_Programa
+LEFT JOIN modulos m 
+    ON a.Id_Modulo = m.Id_Modulo
+LEFT JOIN notas n 
+    ON n.Id_Asignatura = a.Id_Asignatura
+   AND n.id_estudiante = e.id_estudiante
+WHERE ep.Id_Programa = ?
+GROUP BY e.id_estudiante, m.Id_Modulo
+ORDER BY e.apellidos, m.Nombre_modulo
+
     `, [id]);
 
     if (result.length === 0) {
