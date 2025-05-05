@@ -2396,27 +2396,38 @@ async function procesarNotas(data, resultados) {
         asignaturaId = asignaturasExistentes[0].Id_Asignatura;
       }
       
-      // 9. Registrar la nota (según la estructura real de la tabla)
-      const [notasExistentes] = await db.promise().query(
-        'SELECT Id_nota FROM notas WHERE Id_Asignatura = ?',
-        [asignaturaId]
-      );
-      
-      if (notasExistentes.length === 0) {
-        await db.promise().query(
-          'INSERT INTO notas (Nota_Final, Id_Asignatura, Id_tipo_programa) VALUES (?, ?, ?)',
-          [registroNormalizado.nota_final, asignaturaId, idTipoPrograma]
-        );
-        console.log(`✅ Nueva nota registrada: ${registroNormalizado.nombre_asignatura} - ${registroNormalizado.nota_final}`);
-      } else {
-        await db.promise().query(
-          'UPDATE notas SET Nota_Final = ?, Id_tipo_programa = ? WHERE Id_nota = ?',
-          [registroNormalizado.nota_final, idTipoPrograma, notasExistentes[0].Id_nota]
-        );
-        console.log(`✅ Nota actualizada: ${registroNormalizado.nombre_asignatura} - ${registroNormalizado.nota_final}`);
-      }
-      
-      resultados.exitosos++;
+     // 9. Registrar la nota (según la estructura real de la tabla)
+const [estudianteRows] = await db.promise().query(
+  'SELECT id_estudiante FROM estudiantes WHERE documento = ?',
+  [registro.numero_documento]
+);
+
+if (estudianteRows.length === 0) {
+  throw new Error(`Estudiante con documento ${registro.numero_documento} no encontrado`);
+}
+
+const idEstudiante = estudianteRows[0].id_estudiante;
+
+const [notasExistentes] = await db.promise().query(
+  'SELECT Id_nota FROM notas WHERE Id_Asignatura = ? AND id_estudiante = ?',
+  [asignaturaId, estudianteId]
+);
+
+if (notasExistentes.length === 0) {
+  await db.promise().query(
+    'INSERT INTO notas (Nota_Final, Id_Asignatura, id_estudiante) VALUES (?, ?, ?)',
+    [registroNormalizado.nota_final, asignaturaId, estudianteId]
+  );
+  console.log(`✅ Nueva nota registrada: ${registroNormalizado.nombre_asignatura} - ${registroNormalizado.nota_final}`);
+} else {
+  await db.promise().query(
+    'UPDATE notas SET Nota_Final = ? WHERE Id_nota = ?',
+    [registroNormalizado.nota_final, notasExistentes[0].Id_nota]
+  );
+  console.log(`✅ Nota actualizada: ${registroNormalizado.nombre_asignatura} - ${registroNormalizado.nota_final}`);
+}
+resultados.exitosos++;
+
       
     } catch (error) {
       resultados.fallidos++;
@@ -2482,10 +2493,10 @@ app.get('/api/estudiantes/:documento/asignaciones', async (req, res) => {
         n.Nota_Final,
         n.Id_nota
       FROM estudiantes e
-      JOIN programas p ON e.id_estudiante = p.Id_Estudiante
-      JOIN asignaturas a ON p.Id_Programa = a.Id_Programa
+      JOIN notas n ON e.id_estudiante = n.id_estudiante
+      JOIN asignaturas a ON n.Id_Asignatura = a.Id_Asignatura
+      JOIN programas p ON a.Id_Programa = p.Id_Programa
       LEFT JOIN modulos m ON a.Id_Modulo = m.Id_Modulo
-      LEFT JOIN notas n ON a.Id_Asignatura = n.Id_Asignatura
       WHERE e.numero_documento = ?
       ORDER BY p.Nombre_programa, m.Nombre_modulo, a.Nombre_asignatura
     `, [documento]);
@@ -2588,10 +2599,10 @@ app.get('/api/asignaturas/:id/estudiantes', async (req, res) => {
         p.Estado,
         n.Nota_Final,
         n.Id_nota
-      FROM asignaturas a
+      FROM estudiantes e
+      JOIN notas n ON e.id_estudiante = n.id_estudiante
+      JOIN asignaturas a ON n.Id_Asignatura = a.Id_Asignatura
       JOIN programas p ON a.Id_Programa = p.Id_Programa
-      JOIN estudiantes e ON p.Id_Estudiante = e.id_estudiante
-      LEFT JOIN notas n ON a.Id_Asignatura = n.Id_Asignatura
       WHERE a.Id_Asignatura = ?
       ORDER BY e.apellidos
     `, [id]);
@@ -2607,6 +2618,31 @@ app.get('/api/asignaturas/:id/estudiantes', async (req, res) => {
   }
 });
 
+// 📌 7 Obtener todas las notas de un estudiante específico
+app.get('/api/estudiantes/:id/notas', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [result] = await db.promise().query(`
+      SELECT 
+        n.Id_nota,
+        n.Nota_Final,
+        a.Nombre_asignatura,
+        p.Nombre_programa,
+        m.Nombre_modulo
+      FROM notas n
+      JOIN asignaturas a ON n.Id_Asignatura = a.Id_Asignatura
+      JOIN programas p ON a.Id_Programa = p.Id_Programa
+      LEFT JOIN modulos m ON a.Id_Modulo = m.Id_Modulo
+      WHERE n.id_estudiante = ?
+      ORDER BY p.Nombre_programa, a.Nombre_asignatura
+    `, [id]);
+
+    res.json(result);
+  } catch (err) {
+    console.error('❌ Error al obtener notas del estudiante:', err.message);
+    res.status(500).json({ error: 'Error al obtener notas del estudiante' });
+  }
+});
 
 // FIN NOTAS Y PROGRAMAS //
 
