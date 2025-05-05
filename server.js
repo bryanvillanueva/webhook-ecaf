@@ -2445,7 +2445,7 @@ resultados.exitosos++;
 
 // 📌 1. Obtener todos los estudiantes
 app.get('/api/estudiantes', (req, res) => {
-  const sql = `SELECT * FROM estudiantes ORDER BY fecha_registro DESC`;
+  const sql = `SELECT * FROM estudiantes ORDER BY fecha_registro ASC`;
   db.query(sql, (err, results) => {
     if (err) {
       console.error('❌ Error al obtener estudiantes:', err.message);
@@ -2518,7 +2518,7 @@ app.get('/api/programas/:id/estudiantes', async (req, res) => {
 
   try {
     const [result] = await db.promise().query(`
-      SELECT 
+       SELECT 
         e.id_estudiante,
         e.nombres,
         e.apellidos,
@@ -2537,10 +2537,15 @@ app.get('/api/programas/:id/estudiantes', async (req, res) => {
         n.Nota_Final,
         n.Id_nota
       FROM programas p
-      JOIN estudiantes e ON p.Id_Estudiante = e.id_estudiante
-      JOIN asignaturas a ON p.Id_Programa = a.Id_Programa
-      LEFT JOIN modulos m ON a.Id_Modulo = m.Id_Modulo
-      LEFT JOIN notas n ON a.Id_Asignatura = n.Id_Asignatura
+      JOIN estudiantes e 
+        ON p.Id_Estudiante = e.id_estudiante   -- o: e.Id_Programa = p.Id_Programa, según tu modelo
+      JOIN asignaturas a 
+        ON a.Id_Programa = p.Id_Programa
+      LEFT JOIN modulos m 
+        ON a.Id_Modulo = m.Id_Modulo
+      LEFT JOIN notas n
+        ON n.Id_Asignatura = a.Id_Asignatura 
+       AND n.id_estudiante  = e.id_estudiante
       WHERE p.Id_Programa = ?
       ORDER BY e.apellidos, m.Nombre_modulo, a.Nombre_asignatura
     `, [id]);
