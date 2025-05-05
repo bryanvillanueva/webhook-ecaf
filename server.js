@@ -2398,7 +2398,7 @@ async function procesarNotas(data, resultados) {
       
      // 9. Registrar la nota (según la estructura real de la tabla)
 const [estudianteRows] = await db.promise().query(
-  'SELECT id_estudiante FROM estudiantes WHERE documento = ?',
+  'SELECT id_estudiante FROM estudiantes WHERE numero_documento = ?',
   [registro.numero_documento]
 );
 
