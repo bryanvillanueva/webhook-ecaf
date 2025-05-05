@@ -2525,7 +2525,7 @@ app.get('/api/programas/:id/estudiantes', async (req, res) => {
         e.numero_documento,
         p.Id_Programa,
         p.Nombre_programa,
-        p.Estado,
+        p.Estado        AS Estado_programa,
         p.Fecha_Inicio_programa,
         p.Fecha_Fin_programa,
         a.Id_Asignatura,
@@ -2536,17 +2536,19 @@ app.get('/api/programas/:id/estudiantes', async (req, res) => {
         m.Fecha_Fin_modulo,
         n.Nota_Final,
         n.Id_nota
-      FROM programas p
+      FROM estudiante_programa ep
       JOIN estudiantes e 
-        ON p.Id_Estudiante = e.id_estudiante   -- o: e.Id_Programa = p.Id_Programa, según tu modelo
+        ON ep.id_estudiante = e.id_estudiante
+      JOIN programas p 
+        ON ep.Id_Programa   = p.Id_Programa
       JOIN asignaturas a 
-        ON a.Id_Programa = p.Id_Programa
+        ON a.Id_Programa    = p.Id_Programa
       LEFT JOIN modulos m 
-        ON a.Id_Modulo = m.Id_Modulo
-      LEFT JOIN notas n
-        ON n.Id_Asignatura = a.Id_Asignatura 
-       AND n.id_estudiante  = e.id_estudiante
-      WHERE p.Id_Programa = ?
+        ON a.Id_Modulo     = m.Id_Modulo
+      LEFT JOIN notas n 
+        ON n.Id_Asignatura = a.Id_Asignatura
+       AND n.id_estudiante = e.id_estudiante
+      WHERE ep.Id_Programa = ?
       ORDER BY e.apellidos, m.Nombre_modulo, a.Nombre_asignatura
     `, [id]);
 
