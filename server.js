@@ -2651,6 +2651,41 @@ app.get('/api/estudiantes/:id/notas', async (req, res) => {
   }
 });
 
+// 📌 8. Obtener todos los módulos de un programa
+app.get('/api/modulos/:id/estudiantes', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const [result] = await db.promise().query(`
+      SELECT 
+        e.numero_documento,
+        e.nombres,
+        e.apellidos,
+        e.email,
+        a.Nombre_asignatura,
+        m.Id_Modulo
+      FROM estudiante_programa ep
+      JOIN estudiantes e ON ep.id_estudiante = e.id_estudiante
+      JOIN programas p ON ep.Id_Programa = p.Id_Programa
+      JOIN asignaturas a ON a.Id_Programa = p.Id_Programa
+      JOIN modulos m ON a.Id_Modulo = m.Id_Modulo
+      WHERE m.Id_Modulo = ?
+      ORDER BY e.apellidos, a.Nombre_asignatura
+    `, [id]);
+
+    if (result.length === 0) {
+      return res.status(404).json({ error: 'No se encontraron estudiantes en este módulo' });
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error('❌ Error al obtener estudiantes del módulo:', err.message);
+    res.status(500).json({ error: 'Error al obtener estudiantes del módulo' });
+  }
+});
+
+
+
 // FIN NOTAS Y PROGRAMAS //
 
 // Iniciar el sistema de notificaciones cuando arranca la aplicación
