@@ -1914,7 +1914,7 @@ async function validarDuplicadoCursoCorto(estudianteId) {
   };
 }
 
-// 4. Validación actualizada para Diploma de Grado
+// 4. Validación actualizada para Diploma de Grado con mensajes específicos
 async function validarDiplomaGrado(estudianteId) {
   try {
     // Lista de certificaciones técnicas que requieren validación de notas
@@ -1929,8 +1929,8 @@ async function validarDiplomaGrado(estudianteId) {
       'CURSO DE IDONEIDAD'
     ];
 
-    // 1. Buscar programas que sean diplomados, certificaciones técnicas o cursos básicos
-    const [programasValidos] = await db.promise().query(`
+    // 1. Buscar TODOS los programas relacionados (sin filtrar por estado aún)
+    const [todosLosProgramas] = await db.promise().query(`
       SELECT 
         ep.Estado, 
         p.Nombre_programa,
@@ -1944,9 +1944,11 @@ async function validarDiplomaGrado(estudianteId) {
         OR p.Nombre_programa IN (${certificacionesTecnicas.map(() => '?').join(',')})
         OR p.Nombre_programa IN (${cursosBasicos.map(() => '?').join(',')})
       )
+      ORDER BY p.Nombre_programa
     `, [estudianteId, ...certificacionesTecnicas, ...cursosBasicos]);
 
-    if (programasValidos.length === 0) {
+    // 2. Si no tiene NINGÚN programa válido
+    if (todosLosProgramas.length === 0) {
       return {
         esValido: false,
         mensaje: 'El estudiante no tiene diplomados, certificaciones técnicas ni cursos de idoneidad registrados',
@@ -1955,19 +1957,36 @@ async function validarDiplomaGrado(estudianteId) {
       };
     }
 
-    // 2. Verificar que al menos un programa esté CULMINADO
-    const programasCompletados = programasValidos.filter(p => p.Estado === 'CULMINADO');
+    // 3. Analizar el estado de los programas encontrados
+    const programasCompletados = todosLosProgramas.filter(p => p.Estado === 'CULMINADO');
+    const programasEnCurso = todosLosProgramas.filter(p => p.Estado === 'EN CURSO');
+    const programasOtroEstado = todosLosProgramas.filter(p => p.Estado !== 'CULMINADO' && p.Estado !== 'EN CURSO');
 
+    // 4. Si NO tiene ningún programa culminado, dar mensaje específico
     if (programasCompletados.length === 0) {
+      let mensajeEspecifico = '';
+      let detallesEspecificos = '';
+
+      if (programasEnCurso.length > 0) {
+        mensajeEspecifico = 'No puede solicitar diploma para programas que aún están EN CURSO';
+        detallesEspecificos = `Programas en curso: ${programasEnCurso.map(p => p.Nombre_programa).join(', ')}. Debe completar al menos uno para poder solicitar el diploma.`;
+      } else if (programasOtroEstado.length > 0) {
+        mensajeEspecifico = 'Los programas encontrados no están en estado CULMINADO';
+        detallesEspecificos = `Estados actuales: ${programasOtroEstado.map(p => `${p.Nombre_programa}: ${p.Estado}`).join(', ')}. Debe tener al menos un programa CULMINADO.`;
+      } else {
+        mensajeEspecifico = 'No se encontraron programas con estado válido';
+        detallesEspecificos = 'Debe tener al menos un diplomado, certificación técnica o curso de idoneidad CULMINADO';
+      }
+
       return {
         esValido: false,
-        mensaje: 'Debe tener al menos un diplomado, certificación técnica o curso de idoneidad CULMINADO',
-        detalles: `Estados actuales: ${programasValidos.map(p => `${p.Nombre_programa}: ${p.Estado}`).join(', ')}`,
+        mensaje: mensajeEspecifico,
+        detalles: detallesEspecificos,
         precio: 0
       };
     }
 
-    // 3. Para certificaciones técnicas (NO para cursos básicos), validar notas mínimas
+    // 5. Para certificaciones técnicas (NO para cursos básicos), validar notas mínimas
     for (const programa of programasCompletados) {
       // Verificar si es una certificación técnica que requiere validación de notas
       const esCertificacionTecnica = certificacionesTecnicas.includes(programa.Nombre_programa.toUpperCase());
@@ -1993,8 +2012,8 @@ async function validarDiplomaGrado(estudianteId) {
         if (notasPrograma.length === 0) {
           return {
             esValido: false,
-            mensaje: `No se encontraron asignaturas para la certificación: ${programa.Nombre_programa}`,
-            detalles: 'La certificación debe tener asignaturas registradas para validar las notas',
+            mensaje: `La certificación "${programa.Nombre_programa}" no tiene asignaturas registradas`,
+            detalles: 'No se pueden validar las notas porque no hay asignaturas asociadas a esta certificación. Contacte al soporte técnico.',
             precio: 0
           };
         }
@@ -2004,29 +2023,38 @@ async function validarDiplomaGrado(estudianteId) {
         const asignaturasSinNota = [];
 
         for (const asignatura of notasPrograma) {
+          const nombreCompleto = `${asignatura.Nombre_asignatura}${asignatura.Nombre_modulo ? ` (Módulo: ${asignatura.Nombre_modulo})` : ''}`;
+          
           if (asignatura.Nota_Final === null || asignatura.Nota_Final === undefined) {
-            asignaturasSinNota.push(`${asignatura.Nombre_asignatura}${asignatura.Nombre_modulo ? ` (Módulo: ${asignatura.Nombre_modulo})` : ''}`);
+            asignaturasSinNota.push(nombreCompleto);
           } else if (parseFloat(asignatura.Nota_Final) < 3.0) {
-            asignaturasReprobadas.push(`${asignatura.Nombre_asignatura}: ${asignatura.Nota_Final}${asignatura.Nombre_modulo ? ` (Módulo: ${asignatura.Nombre_modulo})` : ''}`);
+            asignaturasReprobadas.push(`${nombreCompleto}: ${asignatura.Nota_Final}`);
           }
         }
 
-        // Si hay asignaturas sin nota o reprobadas, rechazar
+        // Si hay asignaturas sin nota o reprobadas, dar mensaje específico
         if (asignaturasSinNota.length > 0 || asignaturasReprobadas.length > 0) {
-          let detallesError = [];
-          
-          if (asignaturasSinNota.length > 0) {
-            detallesError.push(`Asignaturas sin nota: ${asignaturasSinNota.join(', ')}`);
-          }
+          let mensajeEspecifico = '';
+          let detallesEspecificos = [];
           
           if (asignaturasReprobadas.length > 0) {
-            detallesError.push(`Asignaturas con nota menor a 3.0: ${asignaturasReprobadas.join(', ')}`);
+            mensajeEspecifico = `La certificación "${programa.Nombre_programa}" tiene asignaturas con nota inferior a 3.0`;
+            detallesEspecificos.push(`Asignaturas reprobadas: ${asignaturasReprobadas.join(', ')}`);
           }
+          
+          if (asignaturasSinNota.length > 0) {
+            if (mensajeEspecifico === '') {
+              mensajeEspecifico = `La certificación "${programa.Nombre_programa}" tiene asignaturas sin calificar`;
+            }
+            detallesEspecificos.push(`Asignaturas sin nota: ${asignaturasSinNota.join(', ')}`);
+          }
+
+          detallesEspecificos.push('Todas las asignaturas deben tener nota mínima de 3.0 para solicitar el diploma.');
 
           return {
             esValido: false,
-            mensaje: `La certificación "${programa.Nombre_programa}" no cumple los requisitos de notas mínimas`,
-            detalles: detallesError.join('\n'),
+            mensaje: mensajeEspecifico,
+            detalles: detallesEspecificos.join('\n'),
             precio: 0
           };
         }
@@ -2035,7 +2063,7 @@ async function validarDiplomaGrado(estudianteId) {
       }
     }
 
-    // 4. Si llegamos aquí, todo está validado correctamente
+    // 6. Si llegamos aquí, todo está validado correctamente
     const tiposProgramas = programasCompletados.map(p => {
       if (certificacionesTecnicas.includes(p.Nombre_programa.toUpperCase())) {
         return 'Certificación Técnica';
@@ -2058,8 +2086,8 @@ async function validarDiplomaGrado(estudianteId) {
     console.error('❌ Error en validación de diploma de grado:', error.message);
     return {
       esValido: false,
-      mensaje: 'Error al validar los requisitos del diploma de grado',
-      detalles: `Error técnico: ${error.message}`,
+      mensaje: 'Error técnico al validar los requisitos del diploma de grado',
+      detalles: `No se pudieron verificar los requisitos debido a un error del sistema. Contacte al soporte técnico. Error: ${error.message}`,
       precio: 0
     };
   }
