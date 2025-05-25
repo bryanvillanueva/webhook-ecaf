@@ -642,6 +642,137 @@ app.get('/api/dashboard-info', (req, res) => {
     });
   });
   
+// ENDPOINTS PARA LA GENERACION DE LOS CERTIFICADOS (DESCARGABLES EN PDF)
+
+// Endpoint para obtener datos completos para certificado de notas
+app.get('/api/certificados/:id/datos-notas', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // 1. Obtener información básica del certificado
+    const [certificado] = await db.promise().query(`
+      SELECT * FROM certificados 
+      WHERE id = ? AND tipo_certificado = 'certificado de notas'
+    `, [id]);
+    
+    if (certificado.length === 0) {
+      return res.status(404).json({ error: 'Certificado de notas no encontrado' });
+    }
+    
+    const certData = certificado[0];
+    
+    // 2. Mapear tipo de documento para buscar estudiante
+    const tipoDocumentoMapeado = mapearTipoDocumento(certData.tipo_identificacion);
+    
+    // 3. Buscar estudiante en la base de datos
+    const [estudiante] = await db.promise().query(`
+      SELECT id_estudiante, nombres, apellidos 
+      FROM estudiantes 
+      WHERE tipo_documento = ? AND numero_documento = ?
+    `, [tipoDocumentoMapeado, certData.numero_identificacion]);
+    
+    if (estudiante.length === 0) {
+      return res.status(404).json({ error: 'Estudiante no encontrado' });
+    }
+    
+    const estudianteId = estudiante[0].id_estudiante;
+    
+    // 4. Obtener todas las notas del estudiante con información de programas
+    const [notasDetalladas] = await db.promise().query(`
+      SELECT 
+        p.Nombre_programa,
+        p.Estado as estado_programa,
+        a.Nombre_asignatura,
+        n.Nota_Final,
+        m.Nombre_modulo,
+        ep.Estado as estado_estudiante_programa,
+        ep.Fecha_Inicio as fecha_inicio_programa
+      FROM notas n
+      JOIN asignaturas a ON n.Id_Asignatura = a.Id_Asignatura
+      JOIN programas p ON a.Id_Programa = p.Id_Programa
+      JOIN estudiante_programa ep ON ep.Id_Programa = p.Id_Programa AND ep.id_estudiante = n.id_estudiante
+      LEFT JOIN modulos m ON a.Id_Modulo = m.Id_Modulo
+      WHERE n.id_estudiante = ?
+      AND ep.Estado = 'CULMINADO'
+      ORDER BY p.Nombre_programa, m.Nombre_modulo, a.Nombre_asignatura
+    `, [estudianteId]);
+    
+    if (notasDetalladas.length === 0) {
+      return res.status(404).json({ 
+        error: 'No se encontraron notas para programas culminados' 
+      });
+    }
+    
+    // 5. Agrupar notas por programa
+    const programas = {};
+    notasDetalladas.forEach(nota => {
+      if (!programas[nota.Nombre_programa]) {
+        programas[nota.Nombre_programa] = {
+          nombre: nota.Nombre_programa,
+          estado: nota.estado_programa,
+          fechaInicio: nota.fecha_inicio_programa,
+          asignaturas: [],
+          totalNotas: 0,
+          sumaNotas: 0
+        };
+      }
+      
+      programas[nota.Nombre_programa].asignaturas.push({
+        nombre: nota.Nombre_asignatura,
+        modulo: nota.Nombre_modulo,
+        nota: parseFloat(nota.Nota_Final) || 0
+      });
+      
+      programas[nota.Nombre_programa].totalNotas++;
+      programas[nota.Nombre_programa].sumaNotas += parseFloat(nota.Nota_Final) || 0;
+    });
+    
+    // 6. Calcular promedios
+    Object.keys(programas).forEach(nombrePrograma => {
+      const programa = programas[nombrePrograma];
+      programa.promedio = programa.totalNotas > 0 
+        ? (programa.sumaNotas / programa.totalNotas).toFixed(2)
+        : '0.00';
+    });
+    
+    // 7. Preparar respuesta
+    const response = {
+      certificado: {
+        id: certData.id,
+        referencia: certData.referencia,
+        nombre: certData.nombre,
+        apellido: certData.apellido,
+        tipo_identificacion: certData.tipo_identificacion,
+        numero_identificacion: certData.numero_identificacion,
+        correo: certData.correo,
+        telefono: certData.telefono,
+        fecha_creacion: certData.created_at
+      },
+      estudiante: {
+        nombres: estudiante[0].nombres,
+        apellidos: estudiante[0].apellidos
+      },
+      programas: Object.values(programas),
+      totalProgramas: Object.keys(programas).length,
+      promedioGeneral: Object.values(programas).length > 0 
+        ? (Object.values(programas).reduce((sum, p) => sum + parseFloat(p.promedio), 0) / Object.values(programas).length).toFixed(2)
+        : '0.00'
+    };
+    
+    res.json(response);
+    
+  } catch (error) {
+    console.error('❌ Error al obtener datos para certificado de notas:', error.message);
+    res.status(500).json({ 
+      error: 'Error al obtener datos del certificado de notas',
+      details: error.message 
+    });
+  }
+});
+
+
+
+
 // Endpoint para obtener información del dashboard de certificados
 // Endpoint modificado para incluir cálculos financieros
 // Dashboard de certificados actualizado (usa valores reales de la BD)
