@@ -644,16 +644,8 @@ app.get('/api/dashboard-info', (req, res) => {
   
 // Endpoint para obtener información del dashboard de certificados
 // Endpoint modificado para incluir cálculos financieros
+// Dashboard de certificados actualizado (usa valores reales de la BD)
 app.get('/api/dashboard-certificados', (req, res) => {
-  // Definir precios por tipo de certificado
-  const PRECIOS = {
-    'certificado de estudio': 50000,
-    'certificado de notas': 50000, // Variable: 0 para EN CURSO, 50000 para CULMINADO
-    'duplicado de certificado de curso corto': 30000,
-    'diploma de grado': 295680,
-    'duplicado de diploma': 90000
-  };
-
   // Array de consultas que necesitamos ejecutar
   const queries = {
     // Total de certificados
@@ -684,7 +676,7 @@ app.get('/api/dashboard-certificados', (req, res) => {
     // Certificados recientes (últimos 10)
     certificadosRecientes: `
       SELECT 
-        id, nombre, apellido, tipo_certificado, referencia, 
+        id, nombre, apellido, tipo_certificado, referencia, valor,
         CASE
           WHEN estado IN ('pendiente', 'pending', 'en espera', 'waiting', 'pendiente de pago', 'on-hold') THEN 'pendiente'
           WHEN estado IN ('procesando', 'processing') THEN 'en_proceso'
@@ -715,10 +707,9 @@ app.get('/api/dashboard-certificados', (req, res) => {
       WHERE n.new_status IN ('completado', 'completed')
     `,
     
-    // Consulta para cálculos financieros - Certificados por tipo y estado
-    certificadosPorTipoYEstado: `
+    // NUEVA CONSULTA: Datos financieros usando el campo valor de la tabla
+    datosFinancieros: `
       SELECT 
-        tipo_certificado,
         CASE
           WHEN estado IN ('pendiente', 'pending', 'en espera', 'waiting', 'pendiente de pago', 'on-hold') THEN 'pendiente'
           WHEN estado IN ('procesando', 'processing') THEN 'en_proceso'
@@ -726,9 +717,37 @@ app.get('/api/dashboard-certificados', (req, res) => {
           WHEN estado IN ('fallido', 'failed', 'cancelado', 'cancelled') THEN 'fallido'
           ELSE 'otro'
         END AS estado_normalizado,
-        COUNT(*) AS cantidad
+        SUM(COALESCE(valor, 0)) AS total_valor,
+        COUNT(*) AS cantidad,
+        AVG(COALESCE(valor, 0)) AS valor_promedio
       FROM certificados
-      GROUP BY tipo_certificado, estado_normalizado
+      GROUP BY estado_normalizado
+    `,
+    
+    // NUEVA CONSULTA: Ingresos por tipo de certificado
+    ingresosPorTipo: `
+      SELECT 
+        tipo_certificado,
+        SUM(CASE WHEN estado IN ('completado', 'completed') THEN COALESCE(valor, 0) ELSE 0 END) AS ingresos_realizados,
+        SUM(CASE WHEN estado IN ('pendiente', 'pending', 'procesando', 'processing', 'en espera', 'waiting', 'pendiente de pago', 'on-hold') THEN COALESCE(valor, 0) ELSE 0 END) AS ingresos_esperados,
+        SUM(CASE WHEN estado IN ('fallido', 'failed', 'cancelado', 'cancelled') THEN COALESCE(valor, 0) ELSE 0 END) AS ingresos_perdidos,
+        COUNT(*) AS total_certificados,
+        AVG(COALESCE(valor, 0)) AS valor_promedio
+      FROM certificados
+      GROUP BY tipo_certificado
+    `,
+    
+    // NUEVA CONSULTA: Resumen financiero total
+    resumenFinanciero: `
+      SELECT 
+        SUM(CASE WHEN estado IN ('completado', 'completed') THEN COALESCE(valor, 0) ELSE 0 END) AS total_ingresos_realizados,
+        SUM(CASE WHEN estado IN ('pendiente', 'pending', 'procesando', 'processing', 'en espera', 'waiting', 'pendiente de pago', 'on-hold') THEN COALESCE(valor, 0) ELSE 0 END) AS total_ingresos_esperados,
+        SUM(CASE WHEN estado IN ('fallido', 'failed', 'cancelado', 'cancelled') THEN COALESCE(valor, 0) ELSE 0 END) AS total_ingresos_perdidos,
+        COUNT(CASE WHEN estado IN ('completado', 'completed') THEN 1 END) AS certificados_completados,
+        COUNT(CASE WHEN estado IN ('pendiente', 'pending', 'procesando', 'processing', 'en espera', 'waiting', 'pendiente de pago', 'on-hold') THEN 1 END) AS certificados_pendientes,
+        COUNT(CASE WHEN estado IN ('fallido', 'failed', 'cancelado', 'cancelled') THEN 1 END) AS certificados_fallidos,
+        AVG(COALESCE(valor, 0)) AS valor_promedio_certificado
+      FROM certificados
     `
   };
   
@@ -744,7 +763,7 @@ app.get('/api/dashboard-certificados', (req, res) => {
           reject(err);
         } else {
           // Para consultas que devuelven un solo valor, simplificar la respuesta
-          if (key === 'totalCertificados' || key === 'tiempoPromedio') {
+          if (key === 'totalCertificados' || key === 'tiempoPromedio' || key === 'resumenFinanciero') {
             dashboardData[key] = results[0];
           } else {
             dashboardData[key] = results;
@@ -758,7 +777,7 @@ app.get('/api/dashboard-certificados', (req, res) => {
   // Cuando todas las promesas se resuelvan, devolver los datos
   Promise.all(promises)
     .then(() => {
-      // Añadir métricas calculadas adicionales si es necesario
+      // Añadir métricas calculadas adicionales
       
       // Porcentaje de certificados completados
       if (dashboardData.certificadosPorEstado && dashboardData.totalCertificados) {
@@ -770,30 +789,38 @@ app.get('/api/dashboard-certificados', (req, res) => {
         }
       }
       
-      // Cálculos financieros
-      if (dashboardData.certificadosPorTipoYEstado) {
-        // Inicializar totales por estado
-        const finanzas = {
-          gananciasRealizadas: 0,    // Completados
-          gananciasEsperadas: 0,     // Pendientes + En proceso
-          gananciasPerdidas: 0       // Fallidos
+      // Procesar datos financieros para asegurar que sean números
+      if (dashboardData.resumenFinanciero) {
+        const resumen = dashboardData.resumenFinanciero;
+        dashboardData.resumenFinanciero = {
+          total_ingresos_realizados: Number(resumen.total_ingresos_realizados) || 0,
+          total_ingresos_esperados: Number(resumen.total_ingresos_esperados) || 0,
+          total_ingresos_perdidos: Number(resumen.total_ingresos_perdidos) || 0,
+          certificados_completados: Number(resumen.certificados_completados) || 0,
+          certificados_pendientes: Number(resumen.certificados_pendientes) || 0,
+          certificados_fallidos: Number(resumen.certificados_fallidos) || 0,
+          valor_promedio_certificado: Number(resumen.valor_promedio_certificado) || 0
         };
-        
-        // Calcular valores por tipo de certificado y estado
-        dashboardData.certificadosPorTipoYEstado.forEach(item => {
-          const precio = PRECIOS[item.tipo_certificado] || 0;
-          const valorTotal = precio * item.cantidad;
-          
-          if (item.estado_normalizado === 'completado') {
-            finanzas.gananciasRealizadas += valorTotal;
-          } else if (item.estado_normalizado === 'pendiente' || item.estado_normalizado === 'en_proceso') {
-            finanzas.gananciasEsperadas += valorTotal;
-          } else if (item.estado_normalizado === 'fallido') {
-            finanzas.gananciasPerdidas += valorTotal;
-          }
-        });
-        
-        dashboardData.finanzas = finanzas;
+      }
+      
+      // Procesar ingresos por tipo
+      if (dashboardData.ingresosPorTipo) {
+        dashboardData.ingresosPorTipo = dashboardData.ingresosPorTipo.map(item => ({
+          ...item,
+          ingresos_realizados: Number(item.ingresos_realizados) || 0,
+          ingresos_esperados: Number(item.ingresos_esperados) || 0,
+          ingresos_perdidos: Number(item.ingresos_perdidos) || 0,
+          valor_promedio: Number(item.valor_promedio) || 0
+        }));
+      }
+      
+      // Procesar datos financieros por estado
+      if (dashboardData.datosFinancieros) {
+        dashboardData.datosFinancieros = dashboardData.datosFinancieros.map(item => ({
+          ...item,
+          total_valor: Number(item.total_valor) || 0,
+          valor_promedio: Number(item.valor_promedio) || 0
+        }));
       }
       
       // Añadir estadísticas de certificados por mes (para gráficos de tendencia)
@@ -801,7 +828,8 @@ app.get('/api/dashboard-certificados', (req, res) => {
         SELECT 
           YEAR(created_at) AS año,
           MONTH(created_at) AS mes,
-          COUNT(*) AS cantidad
+          COUNT(*) AS cantidad,
+          SUM(COALESCE(valor, 0)) AS valor_total
         FROM certificados
         GROUP BY YEAR(created_at), MONTH(created_at)
         ORDER BY año ASC, mes ASC
@@ -813,7 +841,8 @@ app.get('/api/dashboard-certificados', (req, res) => {
         } else {
           dashboardData.certificadosPorMes = results.map(item => ({
             ...item,
-            etiqueta: `${item.mes}/${item.año}`
+            etiqueta: `${item.mes}/${item.año}`,
+            valor_total: Number(item.valor_total) || 0
           }));
         }
         
@@ -828,6 +857,58 @@ app.get('/api/dashboard-certificados', (req, res) => {
         details: error.message 
       });
     });
+});
+
+// Endpoint adicional para obtener estadísticas financieras detalladas
+app.get('/api/dashboard-certificados/financiero', (req, res) => {
+  const { fechaInicio, fechaFin } = req.query;
+  
+  let whereClause = '';
+  let params = [];
+  
+  if (fechaInicio && fechaFin) {
+    whereClause = 'WHERE created_at BETWEEN ? AND ?';
+    params = [fechaInicio, fechaFin];
+  }
+  
+  const query = `
+    SELECT 
+      tipo_certificado,
+      estado,
+      COUNT(*) as cantidad,
+      SUM(COALESCE(valor, 0)) as valor_total,
+      AVG(COALESCE(valor, 0)) as valor_promedio,
+      MIN(COALESCE(valor, 0)) as valor_minimo,
+      MAX(COALESCE(valor, 0)) as valor_maximo
+    FROM certificados 
+    ${whereClause}
+    GROUP BY tipo_certificado, estado
+    ORDER BY tipo_certificado, estado
+  `;
+  
+  db.query(query, params, (err, results) => {
+    if (err) {
+      console.error('❌ Error al obtener estadísticas financieras:', err.message);
+      return res.status(500).json({ error: 'Error al obtener estadísticas financieras' });
+    }
+    
+    // Procesar resultados para asegurar tipos numéricos correctos
+    const estadisticasProcessed = results.map(item => ({
+      ...item,
+      valor_total: Number(item.valor_total) || 0,
+      valor_promedio: Number(item.valor_promedio) || 0,
+      valor_minimo: Number(item.valor_minimo) || 0,
+      valor_maximo: Number(item.valor_maximo) || 0
+    }));
+    
+    res.json({
+      periodo: {
+        fechaInicio: fechaInicio || 'Sin filtro',
+        fechaFin: fechaFin || 'Sin filtro'
+      },
+      estadisticas: estadisticasProcessed
+    });
+  });
 });
 
 
@@ -2008,8 +2089,7 @@ app.get('/api/certificados', (req, res) => {
       correo,
       estado,
       valor,
-      created_at,
-      updated_at
+      created_at
     FROM certificados 
     ORDER BY created_at DESC
   `;
@@ -2051,8 +2131,7 @@ app.get('/api/certificados/:id', (req, res) => {
       correo,
       estado,
       valor,
-      created_at,
-      updated_at
+      created_at
     FROM certificados 
     WHERE id = ?
   `;
@@ -2098,8 +2177,7 @@ app.get('/api/certificados/usuario/:email', (req, res) => {
       correo,
       estado,
       valor,
-      created_at,
-      updated_at
+      created_at
     FROM certificados 
     WHERE correo = ?
     ORDER BY created_at DESC
@@ -2121,7 +2199,7 @@ app.get('/api/certificados/usuario/:email', (req, res) => {
   });
 });
 
-// Endpoint para actualizar el valor de un certificado (NUEVO - para administradores)
+/// Endpoint para actualizar el valor de un certificado (NUEVO - para administradores)
 app.put('/api/certificados/:id/valor', (req, res) => {
   const { id } = req.params;
   const { valor } = req.body;
