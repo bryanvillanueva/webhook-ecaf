@@ -1914,43 +1914,155 @@ async function validarDuplicadoCursoCorto(estudianteId) {
   };
 }
 
-// 4. Validación para Diploma de Grado
+// 4. Validación actualizada para Diploma de Grado
 async function validarDiplomaGrado(estudianteId) {
-  const [diplomados] = await db.promise().query(`
-    SELECT ep.Estado, p.Nombre_programa
-    FROM estudiante_programa ep
-    JOIN programas p ON ep.Id_Programa = p.Id_Programa
-    WHERE ep.id_estudiante = ? 
-    AND p.Nombre_programa LIKE '%Diplomado%'
-  `, [estudianteId]);
+  try {
+    // Lista de certificaciones técnicas que requieren validación de notas
+    const certificacionesTecnicas = [
+      'CERTIFICACION EN PERSONAL TRAINER',
+      'CERTIFICACION EN PREPARACION FISICA DEPORTIVA', 
+      'CERTIFICACION EN CLASES GRUPALES FITNESS'
+    ];
 
-  if (diplomados.length === 0) {
+    // Lista de cursos que solo requieren estar culminados (como diplomados)
+    const cursosBasicos = [
+      'CURSO DE IDONEIDAD'
+    ];
+
+    // 1. Buscar programas que sean diplomados, certificaciones técnicas o cursos básicos
+    const [programasValidos] = await db.promise().query(`
+      SELECT 
+        ep.Estado, 
+        p.Nombre_programa,
+        p.Id_Programa,
+        p.Incluye_Modulos
+      FROM estudiante_programa ep
+      JOIN programas p ON ep.Id_Programa = p.Id_Programa
+      WHERE ep.id_estudiante = ? 
+      AND (
+        p.Nombre_programa LIKE '%Diplomado%'
+        OR p.Nombre_programa IN (${certificacionesTecnicas.map(() => '?').join(',')})
+        OR p.Nombre_programa IN (${cursosBasicos.map(() => '?').join(',')})
+      )
+    `, [estudianteId, ...certificacionesTecnicas, ...cursosBasicos]);
+
+    if (programasValidos.length === 0) {
+      return {
+        esValido: false,
+        mensaje: 'El estudiante no tiene diplomados, certificaciones técnicas ni cursos de idoneidad registrados',
+        detalles: 'Solo aplica para diplomados, certificaciones técnicas (Certificación en Personal Trainer, Certificación en Preparación Física Deportiva, Certificación en Clases Grupales Fitness) o Curso de Idoneidad',
+        precio: 0
+      };
+    }
+
+    // 2. Verificar que al menos un programa esté CULMINADO
+    const programasCompletados = programasValidos.filter(p => p.Estado === 'CULMINADO');
+
+    if (programasCompletados.length === 0) {
+      return {
+        esValido: false,
+        mensaje: 'Debe tener al menos un diplomado, certificación técnica o curso de idoneidad CULMINADO',
+        detalles: `Estados actuales: ${programasValidos.map(p => `${p.Nombre_programa}: ${p.Estado}`).join(', ')}`,
+        precio: 0
+      };
+    }
+
+    // 3. Para certificaciones técnicas (NO para cursos básicos), validar notas mínimas
+    for (const programa of programasCompletados) {
+      // Verificar si es una certificación técnica que requiere validación de notas
+      const esCertificacionTecnica = certificacionesTecnicas.includes(programa.Nombre_programa.toUpperCase());
+      
+      if (esCertificacionTecnica) {
+        console.log(`🔍 Validando notas para certificación: ${programa.Nombre_programa}`);
+        
+        // Obtener todas las asignaturas del programa y sus notas
+        const [notasPrograma] = await db.promise().query(`
+          SELECT 
+            a.Id_Asignatura,
+            a.Nombre_asignatura,
+            a.Id_Modulo,
+            m.Nombre_modulo,
+            n.Nota_Final
+          FROM asignaturas a
+          LEFT JOIN modulos m ON a.Id_Modulo = m.Id_Modulo
+          LEFT JOIN notas n ON n.Id_Asignatura = a.Id_Asignatura AND n.id_estudiante = ?
+          WHERE a.Id_Programa = ?
+          ORDER BY a.Nombre_asignatura
+        `, [estudianteId, programa.Id_Programa]);
+
+        if (notasPrograma.length === 0) {
+          return {
+            esValido: false,
+            mensaje: `No se encontraron asignaturas para la certificación: ${programa.Nombre_programa}`,
+            detalles: 'La certificación debe tener asignaturas registradas para validar las notas',
+            precio: 0
+          };
+        }
+
+        // Verificar que todas las asignaturas tengan nota y sean >= 3.0
+        const asignaturasReprobadas = [];
+        const asignaturasSinNota = [];
+
+        for (const asignatura of notasPrograma) {
+          if (asignatura.Nota_Final === null || asignatura.Nota_Final === undefined) {
+            asignaturasSinNota.push(`${asignatura.Nombre_asignatura}${asignatura.Nombre_modulo ? ` (Módulo: ${asignatura.Nombre_modulo})` : ''}`);
+          } else if (parseFloat(asignatura.Nota_Final) < 3.0) {
+            asignaturasReprobadas.push(`${asignatura.Nombre_asignatura}: ${asignatura.Nota_Final}${asignatura.Nombre_modulo ? ` (Módulo: ${asignatura.Nombre_modulo})` : ''}`);
+          }
+        }
+
+        // Si hay asignaturas sin nota o reprobadas, rechazar
+        if (asignaturasSinNota.length > 0 || asignaturasReprobadas.length > 0) {
+          let detallesError = [];
+          
+          if (asignaturasSinNota.length > 0) {
+            detallesError.push(`Asignaturas sin nota: ${asignaturasSinNota.join(', ')}`);
+          }
+          
+          if (asignaturasReprobadas.length > 0) {
+            detallesError.push(`Asignaturas con nota menor a 3.0: ${asignaturasReprobadas.join(', ')}`);
+          }
+
+          return {
+            esValido: false,
+            mensaje: `La certificación "${programa.Nombre_programa}" no cumple los requisitos de notas mínimas`,
+            detalles: detallesError.join('\n'),
+            precio: 0
+          };
+        }
+
+        console.log(`✅ Certificación ${programa.Nombre_programa} validada correctamente - todas las notas >= 3.0`);
+      }
+    }
+
+    // 4. Si llegamos aquí, todo está validado correctamente
+    const tiposProgramas = programasCompletados.map(p => {
+      if (certificacionesTecnicas.includes(p.Nombre_programa.toUpperCase())) {
+        return 'Certificación Técnica';
+      } else if (cursosBasicos.includes(p.Nombre_programa.toUpperCase())) {
+        return 'Curso de Idoneidad';
+      } else {
+        return 'Diplomado';
+      }
+    });
+
+    return {
+      esValido: true,
+      mensaje: `Diploma de grado válido para: ${programasCompletados.map(p => p.Nombre_programa).join(', ')}`,
+      estadoInicial: 'pendiente',
+      precio: 295680,
+      detalles: `Programas validados: ${tiposProgramas.join(', ')}`
+    };
+
+  } catch (error) {
+    console.error('❌ Error en validación de diploma de grado:', error.message);
     return {
       esValido: false,
-      mensaje: 'El estudiante no tiene diplomados registrados',
-      detalles: 'Solo aplica para programas que contengan la palabra "Diplomado"',
+      mensaje: 'Error al validar los requisitos del diploma de grado',
+      detalles: `Error técnico: ${error.message}`,
       precio: 0
     };
   }
-
-  // Verificar que al menos un diplomado esté CULMINADO
-  const diplomadosCompletados = diplomados.filter(d => d.Estado === 'CULMINADO');
-
-  if (diplomadosCompletados.length === 0) {
-    return {
-      esValido: false,
-      mensaje: 'Debe tener al menos un diplomado CULMINADO para solicitar este certificado',
-      detalles: `Estados actuales: ${diplomados.map(d => `${d.Nombre_programa}: ${d.Estado}`).join(', ')}`,
-      precio: 0
-    };
-  }
-
-  return {
-    esValido: true,
-    mensaje: 'Diploma de grado válido',
-    estadoInicial: 'pendiente',
-    precio: 295680
-  };
 }
 
 // 5. Validación para Duplicado de Diploma
