@@ -1465,10 +1465,13 @@ app.post('/api/certificados', async (req, res) => {
   }
 
   try {
-    // Re-validar requisitos por seguridad (validación rápida)
+    // Mapear el tipo de documento para buscar en la tabla estudiantes
+    const tipoDocumentoMapeado = mapearTipoDocumento(tipo_identificacion);
+    
+    // Re-validar que el estudiante existe (validación rápida)
     const [estudiante] = await db.promise().query(
       'SELECT id_estudiante FROM estudiantes WHERE tipo_documento = ? AND numero_documento = ?',
-      [tipo_identificacion, numero_identificacion]
+      [tipoDocumentoMapeado, numero_identificacion]
     );
 
     if (estudiante.length === 0) {
@@ -1517,7 +1520,7 @@ app.post('/api/certificados', async (req, res) => {
     const proximoId = idResult[0].AUTO_INCREMENT;
     const referencia = `${prefijo}${proximoId}`;
 
-    // Insertar certificado
+    // Insertar certificado - IMPORTANTE: Guardamos el tipo_identificacion completo en la tabla certificados
     const sqlCertificado = `
       INSERT INTO certificados 
         (nombre, apellido, tipo_identificacion, numero_identificacion, tipo_certificado, referencia, telefono, correo, estado, valor)
@@ -1527,7 +1530,7 @@ app.post('/api/certificados', async (req, res) => {
     const [result] = await db.promise().query(sqlCertificado, [
       nombre, 
       apellido, 
-      tipo_identificacion, 
+      tipo_identificacion, // Guardamos el nombre completo aquí
       numero_identificacion, 
       tipo_certificado, 
       referencia, 
@@ -1536,6 +1539,8 @@ app.post('/api/certificados', async (req, res) => {
       validacionResult.estadoInicial || 'pendiente',
       validacionResult.precio
     ]);
+    
+    console.log(`✅ Certificado creado: ID ${result.insertId}, Referencia: ${referencia}`);
     
     res.status(201).json({ 
       message: 'Certificado creado exitosamente', 
@@ -1553,11 +1558,368 @@ app.post('/api/certificados', async (req, res) => {
   }
 });
 
-
+// ENDPOINT PARA PROCESAR ESTUDIANTES EN EXCEL TAMBIÉN ACTUALIZADO
+async function procesarEstudiantes(data, resultados) {
+  for (const estudiante of data) {
+    try {
+      // Normalizar datos
+      const estudianteNormalizado = {
+        tipo_documento: estudiante.tipo_documento?.toString().trim(),
+        numero_documento: estudiante.numero_documento?.toString().trim(),
+        nombres: estudiante.nombres?.toString().trim(),
+        apellidos: estudiante.apellidos?.toString().trim(),
+        fecha_nacimiento: estudiante.fecha_nacimiento ? new Date(estudiante.fecha_nacimiento) : null,
+        genero: estudiante.genero?.toString().trim(),
+        email: estudiante.email?.toString().trim(),
+        telefono: estudiante.telefono?.toString().trim(),
+        direccion: estudiante.direccion?.toString().trim(),
+        ciudad: estudiante.ciudad?.toString().trim()
+      };
+      
+      // Validar datos requeridos
+      if (!estudianteNormalizado.tipo_documento || !estudianteNormalizado.numero_documento || 
+          !estudianteNormalizado.nombres || !estudianteNormalizado.apellidos || 
+          !estudianteNormalizado.email || !estudianteNormalizado.telefono) {
+        resultados.fallidos++;
+        resultados.errores.push(`Estudiante con documento ${estudianteNormalizado.numero_documento || 'desconocido'}: Faltan campos obligatorios`);
+        continue;
+      }
+      
+      // IMPORTANTE: En el Excel también esperamos que venga con iniciales (CC, TI, etc.)
+      // Si viene con nombre completo, mapeamos
+      const tipoDocumentoFinal = estudianteNormalizado.tipo_documento.length > 2 
+        ? mapearTipoDocumento(estudianteNormalizado.tipo_documento)
+        : estudianteNormalizado.tipo_documento;
+      
+      // Verificar si el estudiante ya existe
+      const [existentes] = await db.promise().query(
+        'SELECT id_estudiante FROM estudiantes WHERE tipo_documento = ? AND numero_documento = ?',
+        [tipoDocumentoFinal, estudianteNormalizado.numero_documento]
+      );
+      
+      if (existentes.length > 0) {
+        // Actualizar estudiante existente
+        await db.promise().query(
+          `UPDATE estudiantes SET 
+            nombres = ?, 
+            apellidos = ?, 
+            fecha_nacimiento = ?, 
+            genero = ?, 
+            email = ?, 
+            telefono = ?, 
+            direccion = ?, 
+            ciudad = ?
+          WHERE id_estudiante = ?`,
+          [
+            estudianteNormalizado.nombres,
+            estudianteNormalizado.apellidos,
+            estudianteNormalizado.fecha_nacimiento,
+            estudianteNormalizado.genero,
+            estudianteNormalizado.email,
+            estudianteNormalizado.telefono,
+            estudianteNormalizado.direccion,
+            estudianteNormalizado.ciudad,
+            existentes[0].id_estudiante
+          ]
+        );
+        
+        console.log(`✅ Estudiante actualizado: ${estudianteNormalizado.nombres} ${estudianteNormalizado.apellidos}`);
+      } else {
+        // Insertar nuevo estudiante
+        await db.promise().query(
+          `INSERT INTO estudiantes (
+            tipo_documento, 
+            numero_documento, 
+            nombres, 
+            apellidos, 
+            fecha_nacimiento, 
+            genero, 
+            email, 
+            telefono, 
+            direccion, 
+            ciudad,
+            fecha_registro
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+          [
+            tipoDocumentoFinal, // Usar las iniciales mapeadas
+            estudianteNormalizado.numero_documento,
+            estudianteNormalizado.nombres,
+            estudianteNormalizado.apellidos,
+            estudianteNormalizado.fecha_nacimiento,
+            estudianteNormalizado.genero,
+            estudianteNormalizado.email,
+            estudianteNormalizado.telefono,
+            estudianteNormalizado.direccion,
+            estudianteNormalizado.ciudad
+          ]
+        );
+        
+        console.log(`✅ Nuevo estudiante creado: ${estudianteNormalizado.nombres} ${estudianteNormalizado.apellidos}`);
+      }
+      
+      resultados.exitosos++;
+      
+    } catch (error) {
+      resultados.fallidos++;
+      resultados.errores.push(`Error procesando estudiante ${estudiante.numero_documento || 'desconocido'}: ${error.message}`);
+      console.error('❌ Error:', error);
+    }
+  }
+}
 
 // ENDPOINT PARA VALIDAR REQUISITOS ANTES DEL RESUMEN //
+// Función principal de validación
+async function validarSolicitudCertificado(estudianteId, tipoCertificado) {
+  try {
+    switch (tipoCertificado.toLowerCase()) {
+      case 'certificado de estudio':
+        return await validarCertificadoEstudio(estudianteId);
+      
+      case 'certificado de notas':
+        return await validarCertificadoNotas(estudianteId);
+      
+      case 'duplicado de certificado de curso corto':
+        return await validarDuplicadoCursoCorto(estudianteId);
+      
+      case 'diploma de grado':
+        return await validarDiplomaGrado(estudianteId);
+      
+      case 'duplicado de diploma':
+        return await validarDuplicadoDiploma(estudianteId);
+      
+      default:
+        return {
+          esValido: false,
+          mensaje: 'Tipo de certificado no reconocido',
+          precio: 0
+        };
+    }
+  } catch (error) {
+    console.error('❌ Error en validación:', error.message);
+    return {
+      esValido: false,
+      mensaje: 'Error al validar los requisitos del certificado',
+      precio: 0
+    };
+  }
+}
 
-// Endpoint para validar si un estudiante puede solicitar un tipo de certificado
+// 1. Validación para Certificado de Estudio
+async function validarCertificadoEstudio(estudianteId) {
+  const [relaciones] = await db.promise().query(`
+    SELECT ep.Estado, p.Nombre_programa 
+    FROM estudiante_programa ep
+    JOIN programas p ON ep.Id_Programa = p.Id_Programa
+    WHERE ep.id_estudiante = ?
+  `, [estudianteId]);
+
+  if (relaciones.length === 0) {
+    return {
+      esValido: false,
+      mensaje: 'El estudiante no está inscrito en ningún programa',
+      precio: 0
+    };
+  }
+
+  // Verificar que al menos un programa esté EN CURSO o CULMINADO
+  const estadosValidos = relaciones.filter(r => 
+    r.Estado === 'EN CURSO' || r.Estado === 'CULMINADO'
+  );
+
+  if (estadosValidos.length === 0) {
+    return {
+      esValido: false,
+      mensaje: 'El estudiante debe estar EN CURSO o haber CULMINADO al menos un programa para solicitar este certificado',
+      detalles: `Estados actuales: ${relaciones.map(r => r.Estado).join(', ')}`,
+      precio: 0
+    };
+  }
+
+  return {
+    esValido: true,
+    mensaje: 'Certificado de estudio válido',
+    estadoInicial: 'pendiente',
+    precio: 50000
+  };
+}
+
+// 2. Validación para Certificado de Notas
+async function validarCertificadoNotas(estudianteId) {
+  const [relaciones] = await db.promise().query(`
+    SELECT ep.Estado, p.Nombre_programa 
+    FROM estudiante_programa ep
+    JOIN programas p ON ep.Id_Programa = p.Id_Programa
+    WHERE ep.id_estudiante = ?
+  `, [estudianteId]);
+
+  if (relaciones.length === 0) {
+    return {
+      esValido: false,
+      mensaje: 'El estudiante no está inscrito en ningún programa',
+      precio: 0
+    };
+  }
+
+  // Verificar que al menos un programa esté EN CURSO o CULMINADO
+  const estadosValidos = relaciones.filter(r => 
+    r.Estado === 'EN CURSO' || r.Estado === 'CULMINADO'
+  );
+
+  if (estadosValidos.length === 0) {
+    return {
+      esValido: false,
+      mensaje: 'El estudiante debe estar EN CURSO o haber CULMINADO al menos un programa',
+      precio: 0
+    };
+  }
+
+  // Determinar estado y precio según las reglas
+  const tieneEnCurso = relaciones.some(r => r.Estado === 'EN CURSO');
+  
+  if (tieneEnCurso) {
+    return {
+      esValido: true,
+      mensaje: 'Certificado de notas gratuito para estudiante en curso',
+      estadoInicial: 'completado',
+      precio: 0
+    };
+  } else {
+    return {
+      esValido: true,
+      mensaje: 'Certificado de notas para egresado',
+      estadoInicial: 'pendiente',
+      precio: 50000
+    };
+  }
+}
+
+// 3. Validación para Duplicado de Certificado de Curso Corto
+async function validarDuplicadoCursoCorto(estudianteId) {
+  const [cursosCortos] = await db.promise().query(`
+    SELECT ep.Estado, p.Nombre_programa, tp.Nombre_tipo_programa
+    FROM estudiante_programa ep
+    JOIN programas p ON ep.Id_Programa = p.Id_Programa
+    JOIN tipo_programa tp ON tp.Id_Programa = p.Id_Programa
+    WHERE ep.id_estudiante = ? 
+    AND tp.Nombre_tipo_programa IN ('Talleres', 'Seminarios', 'Actualizaciones', 'Cursos Cortos')
+  `, [estudianteId]);
+
+  if (cursosCortos.length === 0) {
+    return {
+      esValido: false,
+      mensaje: 'El estudiante no tiene cursos cortos registrados',
+      detalles: 'Solo aplica para: Talleres, Seminarios, Actualizaciones, Cursos Cortos',
+      precio: 0
+    };
+  }
+
+  // Verificar que al menos un curso corto esté CULMINADO
+  const cursosCompletados = cursosCortos.filter(c => c.Estado === 'CULMINADO');
+
+  if (cursosCompletados.length === 0) {
+    return {
+      esValido: false,
+      mensaje: 'Debe tener al menos un curso corto CULMINADO para solicitar este certificado',
+      detalles: `Estados actuales: ${cursosCortos.map(c => `${c.Nombre_programa}: ${c.Estado}`).join(', ')}`,
+      precio: 0
+    };
+  }
+
+  return {
+    esValido: true,
+    mensaje: 'Duplicado de certificado de curso corto válido',
+    estadoInicial: 'pendiente',
+    precio: 30000
+  };
+}
+
+// 4. Validación para Diploma de Grado
+async function validarDiplomaGrado(estudianteId) {
+  const [diplomados] = await db.promise().query(`
+    SELECT ep.Estado, p.Nombre_programa
+    FROM estudiante_programa ep
+    JOIN programas p ON ep.Id_Programa = p.Id_Programa
+    WHERE ep.id_estudiante = ? 
+    AND p.Nombre_programa LIKE '%Diplomado%'
+  `, [estudianteId]);
+
+  if (diplomados.length === 0) {
+    return {
+      esValido: false,
+      mensaje: 'El estudiante no tiene diplomados registrados',
+      detalles: 'Solo aplica para programas que contengan la palabra "Diplomado"',
+      precio: 0
+    };
+  }
+
+  // Verificar que al menos un diplomado esté CULMINADO
+  const diplomadosCompletados = diplomados.filter(d => d.Estado === 'CULMINADO');
+
+  if (diplomadosCompletados.length === 0) {
+    return {
+      esValido: false,
+      mensaje: 'Debe tener al menos un diplomado CULMINADO para solicitar este certificado',
+      detalles: `Estados actuales: ${diplomados.map(d => `${d.Nombre_programa}: ${d.Estado}`).join(', ')}`,
+      precio: 0
+    };
+  }
+
+  return {
+    esValido: true,
+    mensaje: 'Diploma de grado válido',
+    estadoInicial: 'pendiente',
+    precio: 295680
+  };
+}
+
+// 5. Validación para Duplicado de Diploma
+async function validarDuplicadoDiploma(estudianteId) {
+  // Buscar diplomados y carreras técnicas CULMINADOS
+  const [programasCompletados] = await db.promise().query(`
+    SELECT ep.Estado, p.Nombre_programa, tp.Nombre_tipo_programa
+    FROM estudiante_programa ep
+    JOIN programas p ON ep.Id_Programa = p.Id_Programa
+    LEFT JOIN tipo_programa tp ON tp.Id_Programa = p.Id_Programa
+    WHERE ep.id_estudiante = ? 
+    AND ep.Estado = 'CULMINADO'
+    AND (
+      p.Nombre_programa LIKE '%Diplomado%' 
+      OR tp.Nombre_tipo_programa LIKE '%Técnica%'
+      OR tp.Nombre_tipo_programa LIKE '%Tecnica%'
+    )
+  `, [estudianteId]);
+
+  if (programasCompletados.length === 0) {
+    return {
+      esValido: false,
+      mensaje: 'No tiene diplomados o carreras técnicas culminados',
+      detalles: 'Solo aplica para diplomados o carreras técnicas con estado CULMINADO',
+      precio: 0
+    };
+  }
+
+  return {
+    esValido: true,
+    mensaje: 'Duplicado de diploma válido',
+    estadoInicial: 'pendiente',
+    precio: 90000
+  };
+}
+
+// FUNCIÓN PARA MAPEAR TIPOS DE DOCUMENTO
+function mapearTipoDocumento(tipoCompleto) {
+  const mapeo = {
+    'Cédula de ciudadanía': 'CC',
+    'Tarjeta de Identidad': 'TI', 
+    'Pasaporte': 'PP',
+    'PEP': 'PA',
+    'Cédula de extranjería': 'CE'
+  };
+  
+  return mapeo[tipoCompleto] || tipoCompleto;
+}
+
+// ENDPOINT PARA VALIDAR REQUISITOS ACTUALIZADO
 app.post('/api/certificados/validar-requisitos', async (req, res) => {
   const { tipo_identificacion, numero_identificacion, tipo_certificado } = req.body;
 
@@ -1570,23 +1932,31 @@ app.post('/api/certificados/validar-requisitos', async (req, res) => {
   }
 
   try {
-    // 1. Verificar que el estudiante existe
+    // Mapear el tipo de documento completo a iniciales para buscar en la tabla estudiantes
+    const tipoDocumentoMapeado = mapearTipoDocumento(tipo_identificacion);
+    
+    console.log(`🔍 Buscando estudiante: ${tipo_identificacion} (${tipoDocumentoMapeado}) - ${numero_identificacion}`);
+    
+    // 1. Verificar que el estudiante existe usando las iniciales
     const [estudiante] = await db.promise().query(
-      'SELECT id_estudiante, nombres, apellidos FROM estudiantes WHERE tipo_documento = ? AND numero_documento = ?',
-      [tipo_identificacion, numero_identificacion]
+      'SELECT id_estudiante, nombres, apellidos, tipo_documento FROM estudiantes WHERE tipo_documento = ? AND numero_documento = ?',
+      [tipoDocumentoMapeado, numero_identificacion]
     );
 
     if (estudiante.length === 0) {
+      console.log(`❌ Estudiante no encontrado con tipo: ${tipoDocumentoMapeado}, número: ${numero_identificacion}`);
       return res.status(404).json({ 
         esValido: false,
         error: 'Estudiante no encontrado',
         mensaje: 'No se encontró un estudiante con la identificación proporcionada.',
-        detalles: 'Verifique que el tipo y número de identificación sean correctos.'
+        detalles: `Verifique que el tipo (${tipo_identificacion}) y número de identificación (${numero_identificacion}) sean correctos.`
       });
     }
 
     const estudianteData = estudiante[0];
     const estudianteId = estudianteData.id_estudiante;
+    
+    console.log(`✅ Estudiante encontrado: ${estudianteData.nombres} ${estudianteData.apellidos} (ID: ${estudianteId})`);
 
     // 2. Aplicar validaciones según el tipo de certificado
     const validacionResult = await validarSolicitudCertificado(estudianteId, tipo_certificado);
@@ -1620,6 +1990,7 @@ app.post('/api/certificados/validar-requisitos', async (req, res) => {
     });
   }
 });
+
 
 // Endpoint para obtener todos los certificados
 
