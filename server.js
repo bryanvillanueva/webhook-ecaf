@@ -1462,22 +1462,27 @@ app.post('/api/certificados', (req, res) => {
     return res.status(400).json({ error: 'Todos los campos son obligatorios' });
   }
 
-  // Determinar el prefijo según el tipo de certificado
-  let prefijo = '';
-  switch (tipo_certificado.toLowerCase()) {
-    case 'notas':
-      prefijo = 'CNTS000';
-      break;
-    case 'asistencia':
-    case 'conducta':
-      prefijo = 'CASS000';
-      break;
-    case 'general':
-      prefijo = 'CGNR000';
-      break;
-    default:
-      prefijo = 'CGNR000'; // Valor por defecto
-  }
+// Determinar el prefijo según el tipo de certificado
+let prefijo = '';
+switch (tipo_certificado.toLowerCase()) {
+  case 'certificado de notas':
+    prefijo = 'CNTS000';
+    break;
+  case 'certificado de estudio':
+    prefijo = 'CEST000';
+    break;
+  case 'duplicado de certificado de curso corto':
+    prefijo = 'DCCC000';
+    break;
+  case 'diploma de grado':
+    prefijo = 'DPGR000';
+    break;
+  case 'duplicado de diploma':
+    prefijo = 'CDUP000';
+    break;
+  default:
+    prefijo = 'CGNR000'; // Certificado general por defecto
+}
 
   // Necesitamos obtener el próximo ID que se asignará a certificados
   db.query('SELECT AUTO_INCREMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = "certificados"', (err, idResult) => {
