@@ -1882,7 +1882,7 @@ async function validarDuplicadoCursoCorto(estudianteId) {
     JOIN programas p ON ep.Id_Programa = p.Id_Programa
     JOIN tipo_programa tp ON tp.Id_Programa = p.Id_Programa
     WHERE ep.id_estudiante = ? 
-    AND tp.Nombre_tipo_programa IN ('Talleres', 'Seminarios', 'Actualizaciones', 'Cursos Cortos')
+    AND tp.Nombre_tipo_programa IN ('TALLER', 'SEMINARIO', 'ACTUALIZACION', 'CURSO CORTO')
   `, [estudianteId]);
 
   if (cursosCortos.length === 0) {
