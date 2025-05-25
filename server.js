@@ -1995,16 +1995,170 @@ app.post('/api/certificados/validar-requisitos', async (req, res) => {
 // Endpoint para obtener todos los certificados
 
 app.get('/api/certificados', (req, res) => {
-  const sql = `SELECT * FROM certificados ORDER BY created_at ASC`;
+  const sql = `
+    SELECT 
+      id,
+      nombre,
+      apellido,
+      tipo_identificacion,
+      numero_identificacion,
+      tipo_certificado,
+      referencia,
+      telefono,
+      correo,
+      estado,
+      valor,
+      created_at,
+      updated_at
+    FROM certificados 
+    ORDER BY created_at DESC
+  `;
+  
   db.query(sql, (err, results) => {
     if (err) {
       console.error('❌ Error al obtener certificados:', err.message);
       return res.status(500).json({ error: 'Error al obtener certificados de la base de datos' });
     }
-    res.json(results);
+    
+    // Procesar resultados para asegurar que el valor sea numérico
+    const certificadosProcessed = results.map(cert => ({
+      ...cert,
+      valor: cert.valor ? Number(cert.valor) : 0
+    }));
+    
+    res.json(certificadosProcessed);
   });
 });
 
+// Endpoint para obtener un certificado específico por ID (NUEVO)
+app.get('/api/certificados/:id', (req, res) => {
+  const { id } = req.params;
+  
+  if (!id) {
+    return res.status(400).json({ error: 'Se requiere el ID del certificado' });
+  }
+  
+  const sql = `
+    SELECT 
+      id,
+      nombre,
+      apellido,
+      tipo_identificacion,
+      numero_identificacion,
+      tipo_certificado,
+      referencia,
+      telefono,
+      correo,
+      estado,
+      valor,
+      created_at,
+      updated_at
+    FROM certificados 
+    WHERE id = ?
+  `;
+  
+  db.query(sql, [id], (err, results) => {
+    if (err) {
+      console.error('❌ Error al obtener certificado:', err.message);
+      return res.status(500).json({ error: 'Error al obtener el certificado' });
+    }
+    
+    if (results.length === 0) {
+      return res.status(404).json({ error: 'Certificado no encontrado' });
+    }
+    
+    // Procesar resultado para asegurar que el valor sea numérico
+    const certificado = {
+      ...results[0],
+      valor: results[0].valor ? Number(results[0].valor) : 0
+    };
+    
+    res.json(certificado);
+  });
+});
+
+// Endpoint para obtener certificados por email (NUEVO - útil para usuarios)
+app.get('/api/certificados/usuario/:email', (req, res) => {
+  const { email } = req.params;
+  
+  if (!email) {
+    return res.status(400).json({ error: 'Se requiere el email del usuario' });
+  }
+  
+  const sql = `
+    SELECT 
+      id,
+      nombre,
+      apellido,
+      tipo_identificacion,
+      numero_identificacion,
+      tipo_certificado,
+      referencia,
+      telefono,
+      correo,
+      estado,
+      valor,
+      created_at,
+      updated_at
+    FROM certificados 
+    WHERE correo = ?
+    ORDER BY created_at DESC
+  `;
+  
+  db.query(sql, [email], (err, results) => {
+    if (err) {
+      console.error('❌ Error al obtener certificados por email:', err.message);
+      return res.status(500).json({ error: 'Error al obtener certificados del usuario' });
+    }
+    
+    // Procesar resultados para asegurar que el valor sea numérico
+    const certificadosProcessed = results.map(cert => ({
+      ...cert,
+      valor: cert.valor ? Number(cert.valor) : 0
+    }));
+    
+    res.json(certificadosProcessed);
+  });
+});
+
+// Endpoint para actualizar el valor de un certificado (NUEVO - para administradores)
+app.put('/api/certificados/:id/valor', (req, res) => {
+  const { id } = req.params;
+  const { valor } = req.body;
+  
+  if (!id) {
+    return res.status(400).json({ error: 'Se requiere el ID del certificado' });
+  }
+  
+  if (valor === undefined || valor === null) {
+    return res.status(400).json({ error: 'Se requiere el nuevo valor del certificado' });
+  }
+  
+  // Validar que el valor sea un número positivo
+  const valorNumerico = Number(valor);
+  if (isNaN(valorNumerico) || valorNumerico < 0) {
+    return res.status(400).json({ error: 'El valor debe ser un número positivo' });
+  }
+  
+  const sql = 'UPDATE certificados SET valor = ? WHERE id = ?';
+  
+  db.query(sql, [valorNumerico, id], (err, result) => {
+    if (err) {
+      console.error('❌ Error al actualizar valor del certificado:', err.message);
+      return res.status(500).json({ error: 'Error al actualizar el valor del certificado' });
+    }
+    
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Certificado no encontrado' });
+    }
+    
+    res.json({ 
+      message: 'Valor del certificado actualizado correctamente',
+      certificadoId: id,
+      nuevoValor: valorNumerico
+    });
+  });
+});
 
 // LOGIN // 
 
