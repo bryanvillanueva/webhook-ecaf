@@ -2401,27 +2401,38 @@ async function procesarNotas(data, resultados) {
         asignaturaId = asignaturasExistentes[0].Id_Asignatura;
       }
       
-      // 9. Registrar la nota (según la estructura real de la tabla)
-      const [notasExistentes] = await db.promise().query(
-        'SELECT Id_nota FROM notas WHERE Id_Asignatura = ?',
-        [asignaturaId]
-      );
-      
-      if (notasExistentes.length === 0) {
-        await db.promise().query(
-          'INSERT INTO notas (Nota_Final, Id_Asignatura, Id_tipo_programa) VALUES (?, ?, ?)',
-          [registroNormalizado.nota_final, asignaturaId, idTipoPrograma]
-        );
-        console.log(`✅ Nueva nota registrada: ${registroNormalizado.nombre_asignatura} - ${registroNormalizado.nota_final}`);
-      } else {
-        await db.promise().query(
-          'UPDATE notas SET Nota_Final = ?, Id_tipo_programa = ? WHERE Id_nota = ?',
-          [registroNormalizado.nota_final, idTipoPrograma, notasExistentes[0].Id_nota]
-        );
-        console.log(`✅ Nota actualizada: ${registroNormalizado.nombre_asignatura} - ${registroNormalizado.nota_final}`);
-      }
-      
-      resultados.exitosos++;
+     // 9. Registrar la nota (según la estructura real de la tabla)
+const [estudianteRows] = await db.promise().query(
+  'SELECT id_estudiante FROM estudiantes WHERE numero_documento = ?',
+  [registro.numero_documento]
+);
+
+if (estudianteRows.length === 0) {
+  throw new Error(`Estudiante con documento ${registro.numero_documento} no encontrado`);
+}
+
+const idEstudiante = estudianteRows[0].id_estudiante;
+
+const [notasExistentes] = await db.promise().query(
+  'SELECT Id_nota FROM notas WHERE Id_Asignatura = ? AND id_estudiante = ?',
+  [asignaturaId, estudianteId]
+);
+
+if (notasExistentes.length === 0) {
+  await db.promise().query(
+    'INSERT INTO notas (Nota_Final, Id_Asignatura, id_estudiante) VALUES (?, ?, ?)',
+    [registroNormalizado.nota_final, asignaturaId, estudianteId]
+  );
+  console.log(`✅ Nueva nota registrada: ${registroNormalizado.nombre_asignatura} - ${registroNormalizado.nota_final}`);
+} else {
+  await db.promise().query(
+    'UPDATE notas SET Nota_Final = ? WHERE Id_nota = ?',
+    [registroNormalizado.nota_final, notasExistentes[0].Id_nota]
+  );
+  console.log(`✅ Nota actualizada: ${registroNormalizado.nombre_asignatura} - ${registroNormalizado.nota_final}`);
+}
+resultados.exitosos++;
+
       
     } catch (error) {
       resultados.fallidos++;
@@ -2439,7 +2450,7 @@ async function procesarNotas(data, resultados) {
 
 // 📌 1. Obtener todos los estudiantes
 app.get('/api/estudiantes', (req, res) => {
-  const sql = `SELECT * FROM estudiantes ORDER BY fecha_registro DESC`;
+  const sql = `SELECT * FROM estudiantes ORDER BY fecha_registro ASC`;
   db.query(sql, (err, results) => {
     if (err) {
       console.error('❌ Error al obtener estudiantes:', err.message);
@@ -2473,6 +2484,8 @@ app.get('/api/estudiantes/:documento/asignaciones', async (req, res) => {
         e.nombres,
         e.apellidos,
         e.numero_documento,
+        e.tipo_documento,
+        e.email,
         p.Id_Programa,
         p.Nombre_programa,
         p.Estado,
@@ -2487,10 +2500,10 @@ app.get('/api/estudiantes/:documento/asignaciones', async (req, res) => {
         n.Nota_Final,
         n.Id_nota
       FROM estudiantes e
-      JOIN programas p ON e.id_estudiante = p.Id_Estudiante
-      JOIN asignaturas a ON p.Id_Programa = a.Id_Programa
+      JOIN notas n ON e.id_estudiante = n.id_estudiante
+      JOIN asignaturas a ON n.Id_Asignatura = a.Id_Asignatura
+      JOIN programas p ON a.Id_Programa = p.Id_Programa
       LEFT JOIN modulos m ON a.Id_Modulo = m.Id_Modulo
-      LEFT JOIN notas n ON a.Id_Asignatura = n.Id_Asignatura
       WHERE e.numero_documento = ?
       ORDER BY p.Nombre_programa, m.Nombre_modulo, a.Nombre_asignatura
     `, [documento]);
@@ -2512,31 +2525,40 @@ app.get('/api/programas/:id/estudiantes', async (req, res) => {
 
   try {
     const [result] = await db.promise().query(`
-      SELECT 
-        e.id_estudiante,
-        e.nombres,
-        e.apellidos,
-        e.numero_documento,
-        p.Id_Programa,
-        p.Nombre_programa,
-        p.Estado,
-        p.Fecha_Inicio_programa,
-        p.Fecha_Fin_programa,
-        a.Id_Asignatura,
-        a.Nombre_asignatura,
-        a.Id_Modulo,
-        m.Nombre_modulo,
-        m.Fecha_Inicio_modulo,
-        m.Fecha_Fin_modulo,
-        n.Nota_Final,
-        n.Id_nota
-      FROM programas p
-      JOIN estudiantes e ON p.Id_Estudiante = e.id_estudiante
-      JOIN asignaturas a ON p.Id_Programa = a.Id_Programa
-      LEFT JOIN modulos m ON a.Id_Modulo = m.Id_Modulo
-      LEFT JOIN notas n ON a.Id_Asignatura = n.Id_Asignatura
-      WHERE p.Id_Programa = ?
-      ORDER BY e.apellidos, m.Nombre_modulo, a.Nombre_asignatura
+       SELECT 
+    e.id_estudiante,
+    e.nombres,
+    e.apellidos,
+    e.numero_documento,
+    e.tipo_documento,
+    e.email,
+    p.Id_Programa,
+    p.Nombre_programa,
+    p.Estado AS Estado_programa,
+    p.Fecha_Inicio_programa,
+    p.Fecha_Fin_programa,
+    m.Id_Modulo,
+    m.Nombre_modulo,
+    m.Fecha_Inicio_modulo,
+    m.Fecha_Fin_modulo,
+    n.Nota_Final,
+    n.Id_nota
+FROM estudiante_programa ep
+JOIN estudiantes e 
+    ON ep.id_estudiante = e.id_estudiante
+JOIN programas p 
+    ON ep.Id_Programa = p.Id_Programa
+JOIN asignaturas a 
+    ON a.Id_Programa = p.Id_Programa
+LEFT JOIN modulos m 
+    ON a.Id_Modulo = m.Id_Modulo
+LEFT JOIN notas n 
+    ON n.Id_Asignatura = a.Id_Asignatura
+   AND n.id_estudiante = e.id_estudiante
+WHERE ep.Id_Programa = ?
+GROUP BY e.id_estudiante, m.Id_Modulo
+ORDER BY e.apellidos, m.Nombre_modulo
+
     `, [id]);
 
     if (result.length === 0) {
@@ -2589,14 +2611,16 @@ app.get('/api/asignaturas/:id/estudiantes', async (req, res) => {
         e.nombres,
         e.apellidos,
         e.numero_documento,
+        e.tipo_documento,
+        e.email,
         p.Nombre_programa,
         p.Estado,
         n.Nota_Final,
         n.Id_nota
-      FROM asignaturas a
+      FROM estudiantes e
+      JOIN notas n ON e.id_estudiante = n.id_estudiante
+      JOIN asignaturas a ON n.Id_Asignatura = a.Id_Asignatura
       JOIN programas p ON a.Id_Programa = p.Id_Programa
-      JOIN estudiantes e ON p.Id_Estudiante = e.id_estudiante
-      LEFT JOIN notas n ON a.Id_Asignatura = n.Id_Asignatura
       WHERE a.Id_Asignatura = ?
       ORDER BY e.apellidos
     `, [id]);
@@ -2609,6 +2633,93 @@ app.get('/api/asignaturas/:id/estudiantes', async (req, res) => {
   } catch (err) {
     console.error('❌ Error al obtener estudiantes para la asignatura:', err.message);
     res.status(500).json({ error: 'Error al obtener estudiantes para la asignatura' });
+  }
+});
+
+// 📌 7 Obtener todas las notas de un estudiante específico
+app.get('/api/estudiantes/:id/notas', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [result] = await db.promise().query(`
+      SELECT 
+        n.Id_nota,
+        n.Nota_Final,
+        a.Nombre_asignatura,
+        p.Nombre_programa,
+        m.Nombre_modulo
+      FROM notas n
+      JOIN asignaturas a ON n.Id_Asignatura = a.Id_Asignatura
+      JOIN programas p ON a.Id_Programa = p.Id_Programa
+      LEFT JOIN modulos m ON a.Id_Modulo = m.Id_Modulo
+      WHERE n.id_estudiante = ?
+      ORDER BY p.Nombre_programa, a.Nombre_asignatura
+    `, [id]);
+
+    res.json(result);
+  } catch (err) {
+    console.error('❌ Error al obtener notas del estudiante:', err.message);
+    res.status(500).json({ error: 'Error al obtener notas del estudiante' });
+  }
+});
+
+// 📌 8. Obtener todos los módulos de un programa
+app.get('/api/modulos/:id/estudiantes', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Primero obtenemos los estudiantes y sus asignaturas en el módulo
+    const [result] = await db.promise().query(`
+      SELECT 
+        e.id_estudiante,
+        e.numero_documento,
+        e.tipo_documento,
+        e.nombres,
+        e.apellidos,
+        e.email,
+        a.Id_Asignatura,
+        a.Nombre_asignatura,
+        m.Id_Modulo,
+        m.Nombre_modulo
+      FROM estudiante_programa ep
+      JOIN estudiantes e ON ep.id_estudiante = e.id_estudiante
+      JOIN programas p ON ep.Id_Programa = p.Id_Programa
+      JOIN asignaturas a ON a.Id_Programa = p.Id_Programa
+      JOIN modulos m ON a.Id_Modulo = m.Id_Modulo
+      WHERE m.Id_Modulo = ?
+      ORDER BY e.apellidos, e.nombres, a.Nombre_asignatura
+    `, [id]);
+
+    if (result.length === 0) {
+      return res.status(404).json({ error: 'No se encontraron estudiantes en este módulo' });
+    }
+
+    // Agrupamos los resultados por estudiante
+    const estudiantesAgrupados = {};
+    result.forEach(row => {
+      if (!estudiantesAgrupados[row.id_estudiante]) {
+        estudiantesAgrupados[row.id_estudiante] = {
+          id_estudiante: row.id_estudiante,
+          numero_documento: row.numero_documento,
+          tipo_documento: row.tipo_documento,
+          nombres: row.nombres,
+          apellidos: row.apellidos,
+          email: row.email,
+          asignaturas: []
+        };
+      }
+      
+      if (row.Id_Asignatura) {
+        estudiantesAgrupados[row.id_estudiante].asignaturas.push({
+          Id_Asignatura: row.Id_Asignatura,
+          Nombre_asignatura: row.Nombre_asignatura
+        });
+      }
+    });
+
+    res.json(Object.values(estudiantesAgrupados));
+  } catch (err) {
+    console.error('❌ Error al obtener estudiantes del módulo:', err.message);
+    res.status(500).json({ error: 'Error al obtener estudiantes del módulo' });
   }
 });
 
