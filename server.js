@@ -647,9 +647,11 @@ app.get('/api/dashboard-info', (req, res) => {
 app.get('/api/dashboard-certificados', (req, res) => {
   // Definir precios por tipo de certificado
   const PRECIOS = {
-    'Certificado de notas': 10000,
-    'Certificado general': 20000,
-    'Certificado de asistencia': 12000
+    'certificado de estudio': 50000,
+    'certificado de notas': 50000, // Variable: 0 para EN CURSO, 50000 para CULMINADO
+    'duplicado de certificado de curso corto': 30000,
+    'diploma de grado': 295680,
+    'duplicado de diploma': 90000
   };
 
   // Array de consultas que necesitamos ejecutar
@@ -1453,55 +1455,76 @@ app.get('/api/download-document/:mediaId', async (req, res) => {
 
 // Endpoint para crear un nuevo certificado
 
-app.post('/api/certificados', (req, res) => {
-  // Extraemos los datos enviados en el cuerpo de la solicitud
+// ENDPOINT ORIGINAL DE CREACIÓN (simplificado, ya que la validación se hizo antes)
+app.post('/api/certificados', async (req, res) => {
   const { nombre, apellido, tipo_identificacion, numero_identificacion, tipo_certificado, telefono, correo } = req.body;
 
-  // Validamos que se hayan enviado todos los campos requeridos
+  // Validar campos requeridos
   if (!nombre || !apellido || !tipo_identificacion || !numero_identificacion || !tipo_certificado || !telefono || !correo) {
     return res.status(400).json({ error: 'Todos los campos son obligatorios' });
   }
 
-// Determinar el prefijo según el tipo de certificado
-let prefijo = '';
-switch (tipo_certificado.toLowerCase()) {
-  case 'certificado de notas':
-    prefijo = 'CNTS000';
-    break;
-  case 'certificado de estudio':
-    prefijo = 'CEST000';
-    break;
-  case 'duplicado de certificado de curso corto':
-    prefijo = 'DCCC000';
-    break;
-  case 'diploma de grado':
-    prefijo = 'DPGR000';
-    break;
-  case 'duplicado de diploma':
-    prefijo = 'CDUP000';
-    break;
-  default:
-    prefijo = 'CGNR000'; // Certificado general por defecto
-}
+  try {
+    // Re-validar requisitos por seguridad (validación rápida)
+    const [estudiante] = await db.promise().query(
+      'SELECT id_estudiante FROM estudiantes WHERE tipo_documento = ? AND numero_documento = ?',
+      [tipo_identificacion, numero_identificacion]
+    );
 
-  // Necesitamos obtener el próximo ID que se asignará a certificados
-  db.query('SELECT AUTO_INCREMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = "certificados"', (err, idResult) => {
-    if (err) {
-      console.error('❌ Error al obtener próximo ID de certificados:', err.message);
-      return res.status(500).json({ error: 'Error al generar referencia' });
+    if (estudiante.length === 0) {
+      return res.status(404).json({ 
+        error: 'Estudiante no encontrado'
+      });
     }
 
+    const estudianteId = estudiante[0].id_estudiante;
+    const validacionResult = await validarSolicitudCertificado(estudianteId, tipo_certificado);
+    
+    if (!validacionResult.esValido) {
+      return res.status(400).json({ 
+        error: 'No cumple los requisitos',
+        mensaje: validacionResult.mensaje
+      });
+    }
+
+    // Determinar prefijo
+    let prefijo = '';
+    switch (tipo_certificado.toLowerCase()) {
+      case 'certificado de estudio':
+        prefijo = 'CEST000';
+        break;
+      case 'certificado de notas':
+        prefijo = 'CNTS000';
+        break;
+      case 'duplicado de certificado de curso corto':
+        prefijo = 'DCCC000';
+        break;
+      case 'diploma de grado':
+        prefijo = 'DPGR000';
+        break;
+      case 'duplicado de diploma':
+        prefijo = 'CDUP000';
+        break;
+      default:
+        prefijo = 'CGNR000';
+    }
+
+    // Obtener próximo ID y crear referencia
+    const [idResult] = await db.promise().query(
+      'SELECT AUTO_INCREMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = "certificados"'
+    );
+    
     const proximoId = idResult[0].AUTO_INCREMENT;
     const referencia = `${prefijo}${proximoId}`;
 
-    // Preparamos la consulta SQL para insertar el registro en certificados con la referencia
+    // Insertar certificado
     const sqlCertificado = `
       INSERT INTO certificados 
-        (nombre, apellido, tipo_identificacion, numero_identificacion, tipo_certificado, referencia, telefono, correo)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (nombre, apellido, tipo_identificacion, numero_identificacion, tipo_certificado, referencia, telefono, correo, estado, valor)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
-    db.query(sqlCertificado, [
+    const [result] = await db.promise().query(sqlCertificado, [
       nombre, 
       apellido, 
       tipo_identificacion, 
@@ -1509,22 +1532,93 @@ switch (tipo_certificado.toLowerCase()) {
       tipo_certificado, 
       referencia, 
       telefono, 
-      correo
-    ], (err, result) => {
-      if (err) {
-        console.error('❌ Error al insertar certificado:', err.message);
-        return res.status(500).json({ error: 'Error al insertar certificado en la base de datos' });
-      }
-      
-      const certificadoId = result.insertId;
-      
-      res.status(201).json({ 
-        message: 'Certificado insertado exitosamente', 
-        id: certificadoId,
-        referencia: referencia
-      });
+      correo,
+      validacionResult.estadoInicial || 'pendiente',
+      validacionResult.precio
+    ]);
+    
+    res.status(201).json({ 
+      message: 'Certificado creado exitosamente', 
+      id: result.insertId,
+      referencia: referencia,
+      estado: validacionResult.estadoInicial,
+      valor: validacionResult.precio
     });
-  });
+
+  } catch (error) {
+    console.error('❌ Error al crear certificado:', error.message);
+    res.status(500).json({ 
+      error: 'Error interno del servidor'
+    });
+  }
+});
+
+
+
+// ENDPOINT PARA VALIDAR REQUISITOS ANTES DEL RESUMEN //
+
+// Endpoint para validar si un estudiante puede solicitar un tipo de certificado
+app.post('/api/certificados/validar-requisitos', async (req, res) => {
+  const { tipo_identificacion, numero_identificacion, tipo_certificado } = req.body;
+
+  // Validar campos requeridos
+  if (!tipo_identificacion || !numero_identificacion || !tipo_certificado) {
+    return res.status(400).json({ 
+      error: 'Campos requeridos faltantes',
+      mensaje: 'Se requiere tipo de identificación, número de identificación y tipo de certificado'
+    });
+  }
+
+  try {
+    // 1. Verificar que el estudiante existe
+    const [estudiante] = await db.promise().query(
+      'SELECT id_estudiante, nombres, apellidos FROM estudiantes WHERE tipo_documento = ? AND numero_documento = ?',
+      [tipo_identificacion, numero_identificacion]
+    );
+
+    if (estudiante.length === 0) {
+      return res.status(404).json({ 
+        esValido: false,
+        error: 'Estudiante no encontrado',
+        mensaje: 'No se encontró un estudiante con la identificación proporcionada.',
+        detalles: 'Verifique que el tipo y número de identificación sean correctos.'
+      });
+    }
+
+    const estudianteData = estudiante[0];
+    const estudianteId = estudianteData.id_estudiante;
+
+    // 2. Aplicar validaciones según el tipo de certificado
+    const validacionResult = await validarSolicitudCertificado(estudianteId, tipo_certificado);
+    
+    // 3. Responder con el resultado de la validación
+    if (validacionResult.esValido) {
+      res.status(200).json({
+        esValido: true,
+        mensaje: validacionResult.mensaje,
+        precio: validacionResult.precio,
+        estadoInicial: validacionResult.estadoInicial,
+        estudianteNombre: `${estudianteData.nombres} ${estudianteData.apellidos}`,
+        detalles: validacionResult.detalles || 'Cumple todos los requisitos para este certificado'
+      });
+    } else {
+      res.status(400).json({
+        esValido: false,
+        mensaje: validacionResult.mensaje,
+        detalles: validacionResult.detalles,
+        estudianteNombre: `${estudianteData.nombres} ${estudianteData.apellidos}`,
+        error: 'No cumple los requisitos'
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Error al validar requisitos:', error.message);
+    res.status(500).json({ 
+      esValido: false,
+      error: 'Error interno del servidor',
+      mensaje: 'No se pudieron validar los requisitos del certificado'
+    });
+  }
 });
 
 // Endpoint para obtener todos los certificados
