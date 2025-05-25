@@ -1921,7 +1921,8 @@ async function validarDiplomaGrado(estudianteId) {
     const certificacionesTecnicas = [
       'CERTIFICACION EN PERSONAL TRAINER',
       'CERTIFICACION EN PREPARACION FISICA DEPORTIVA', 
-      'CERTIFICACION EN CLASES GRUPALES FITNESS'
+      'CERTIFICACION EN CLASES GRUPALES FITNESS',
+      'CERTIFICACION FITNESS'
     ];
 
     // Lista de cursos que solo requieren estar culminados (como diplomados)
@@ -1952,7 +1953,7 @@ async function validarDiplomaGrado(estudianteId) {
       return {
         esValido: false,
         mensaje: 'El estudiante no tiene diplomados, certificaciones técnicas ni cursos de idoneidad registrados',
-        detalles: 'Solo aplica para diplomados, certificaciones técnicas (Certificación en Personal Trainer, Certificación en Preparación Física Deportiva, Certificación en Clases Grupales Fitness) o Curso de Idoneidad',
+        detalles: 'Solo aplica para diplomados, certificaciones técnicas (Certificación en Personal Trainer, Certificacion Fitness, Certificación en Preparación Física Deportiva, Certificación en Clases Grupales Fitness) o Curso de Idoneidad',
         precio: 0
       };
     }
