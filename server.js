@@ -3085,16 +3085,30 @@ const excelUpload = multer({
 });
 
 // Endpoint para servir las plantillas
+// Endpoint para servir las plantillas (ACTUALIZADO)
 app.get('/api/plantillas-excel/:tipo', (req, res) => {
   try {
     const { tipo } = req.params;
     
-    if (!['estudiantes', 'notas'].includes(tipo.toLowerCase())) {
-      return res.status(400).json({ error: 'Tipo de plantilla no válido. Use "estudiantes" o "notas".' });
+    if (!['estudiantes', 'notas', 'diplomas'].includes(tipo.toLowerCase())) {
+      return res.status(400).json({ error: 'Tipo de plantilla no válido. Use "estudiantes", "notas" o "diplomas".' });
     }
     
     // Ruta a las plantillas
-    const rutaPlantilla = `./plantillas/Plantilla_${tipo === 'estudiantes' ? 'Estudiantes' : 'Notas_Programas'}.xlsx`;
+    let nombreArchivo;
+    switch(tipo.toLowerCase()) {
+      case 'estudiantes':
+        nombreArchivo = 'Plantilla_Estudiantes.xlsx';
+        break;
+      case 'notas':
+        nombreArchivo = 'Plantilla_Notas_Programas.xlsx';
+        break;
+      case 'diplomas':
+        nombreArchivo = 'Plantilla_Diplomas.xlsx';
+        break;
+    }
+    
+    const rutaPlantilla = `./plantillas/${nombreArchivo}`;
     
     // Verificar existencia del archivo
     if (!fs.existsSync(rutaPlantilla)) {
@@ -3103,7 +3117,7 @@ app.get('/api/plantillas-excel/:tipo', (req, res) => {
     }
     
     // Enviar el archivo
-    res.download(rutaPlantilla, `Plantilla_${tipo.charAt(0).toUpperCase() + tipo.slice(1)}.xlsx`);
+    res.download(rutaPlantilla, nombreArchivo);
     
   } catch (error) {
     console.error('❌ Error al servir plantilla:', error.message);
@@ -3111,7 +3125,7 @@ app.get('/api/plantillas-excel/:tipo', (req, res) => {
   }
 });
 
-// Endpoint para cargar archivos Excel
+// Endpoint para cargar archivos Excel (ACTUALIZADO)
 app.post('/api/cargar-excel', excelUpload.single('archivo'), async (req, res) => {
   try {
     // Validar archivo
@@ -3121,8 +3135,8 @@ app.post('/api/cargar-excel', excelUpload.single('archivo'), async (req, res) =>
     
     // Validar tipo
     const { tipo } = req.body;
-    if (!tipo || !['estudiantes', 'notas'].includes(tipo.toLowerCase())) {
-      return res.status(400).json({ error: 'Tipo de carga no válido. Use "estudiantes" o "notas".' });
+    if (!tipo || !['estudiantes', 'notas', 'diplomas'].includes(tipo.toLowerCase())) {
+      return res.status(400).json({ error: 'Tipo de carga no válido. Use "estudiantes", "notas" o "diplomas".' });
     }
     
     console.log(`📊 Procesando archivo ${req.file.originalname} de tipo ${tipo}`);
@@ -3150,12 +3164,14 @@ app.post('/api/cargar-excel', excelUpload.single('archivo'), async (req, res) =>
       errores: []
     };
     
-// Procesar según el tipo
-if (tipo.toLowerCase() === 'estudiantes') {
-  await procesarEstudiantes(data, resultados);
-} else {
-  await procesarNotas(data, resultados); 
-}
+    // Procesar según el tipo
+    if (tipo.toLowerCase() === 'estudiantes') {
+      await procesarEstudiantes(data, resultados);
+    } else if (tipo.toLowerCase() === 'notas') {
+      await procesarNotas(data, resultados); 
+    } else if (tipo.toLowerCase() === 'diplomas') {
+      await procesarDiplomas(data, resultados); // NUEVA FUNCIÓN
+    }
     
     console.log(`✅ Proceso completado. Exitosos: ${resultados.exitosos}, Fallidos: ${resultados.fallidos}`);
     
@@ -3530,6 +3546,187 @@ resultados.exitosos++;
     }
   }
 }
+
+// NUEVA FUNCIÓN PARA PROCESAR DIPLOMAS
+async function procesarDiplomas(data, resultados) {
+  for (const diploma of data) {
+    try {
+      // 1. Normalizar datos
+      const diplomaNormalizado = {
+        nombre: (diploma.nombre || '').toString().trim(),
+        apellido: (diploma.apellido || '').toString().trim(),
+        tipo_identificacion: (diploma.tipo_identificacion || '').toString().trim(),
+        numero_identificacion: (diploma.numero_identificacion || '').toString().trim(),
+        tipo_diploma: (diploma.tipo_diploma || '').toString().trim(),
+        nombre_tipo_diploma: (diploma.nombre_tipo_diploma || '').toString().trim(),
+        modalidad: (diploma.modalidad || '').toString().trim(),
+        fecha_grado: diploma.fecha_grado ? new Date(diploma.fecha_grado) : null,
+        libro: (diploma.libro || '').toString().trim(),
+        acta: (diploma.acta || '').toString().trim(),
+        referencia: (diploma.referencia || '').toString().trim(),
+        telefono: (diploma.telefono || '').toString().trim(),
+        correo: (diploma.correo || '').toString().trim(),
+        estado: (diploma.estado || 'Activo').toString().trim(),
+        valor: parseFloat(diploma.valor) || null,
+        valor_cop: parseFloat(diploma.valor_cop) || null
+      };
+      
+      // 2. Validar campos obligatorios
+      const camposRequeridos = [
+        'nombre', 'apellido', 'tipo_identificacion', 'numero_identificacion',
+        'tipo_diploma', 'nombre_tipo_diploma', 'modalidad', 'fecha_grado',
+        'libro', 'acta', 'referencia', 'telefono', 'correo', 'estado'
+      ];
+      
+      const camposFaltantes = camposRequeridos.filter(campo => 
+        !diplomaNormalizado[campo] || 
+        (campo === 'fecha_grado' && !diplomaNormalizado.fecha_grado)
+      );
+      
+      if (camposFaltantes.length > 0) {
+        resultados.fallidos++;
+        resultados.errores.push(
+          `Diploma para ${diplomaNormalizado.nombre} ${diplomaNormalizado.apellido} (${diplomaNormalizado.numero_identificacion}): Faltan campos obligatorios: ${camposFaltantes.join(', ')}`
+        );
+        continue;
+      }
+      
+      // 3. Validar formato de email
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(diplomaNormalizado.correo)) {
+        resultados.fallidos++;
+        resultados.errores.push(
+          `Diploma para ${diplomaNormalizado.nombre} ${diplomaNormalizado.apellido}: Email inválido (${diplomaNormalizado.correo})`
+        );
+        continue;
+      }
+      
+      // 4. Validar que la fecha de grado no sea futura
+      if (diplomaNormalizado.fecha_grado > new Date()) {
+        resultados.fallidos++;
+        resultados.errores.push(
+          `Diploma para ${diplomaNormalizado.nombre} ${diplomaNormalizado.apellido}: La fecha de grado no puede ser futura`
+        );
+        continue;
+      }
+      
+      // 5. Verificar si el diploma ya existe por referencia o por estudiante+tipo
+      const [diplomasExistentes] = await db.promise().query(
+        `SELECT id FROM diploma 
+         WHERE referencia = ? 
+            OR (numero_identificacion = ? AND tipo_diploma = ? AND nombre_tipo_diploma = ?)`,
+        [
+          diplomaNormalizado.referencia,
+          diplomaNormalizado.numero_identificacion,
+          diplomaNormalizado.tipo_diploma,
+          diplomaNormalizado.nombre_tipo_diploma
+        ]
+      );
+      
+      if (diplomasExistentes.length > 0) {
+        // Actualizar diploma existente
+        const diplomaId = diplomasExistentes[0].id;
+        
+        await db.promise().query(
+          `UPDATE diploma SET 
+            nombre = ?,
+            apellido = ?,
+            tipo_identificacion = ?,
+            numero_identificacion = ?,
+            tipo_diploma = ?,
+            nombre_tipo_diploma = ?,
+            modalidad = ?,
+            fecha_grado = ?,
+            libro = ?,
+            acta = ?,
+            referencia = ?,
+            telefono = ?,
+            correo = ?,
+            estado = ?,
+            valor = ?,
+            valor_cop = ?
+          WHERE id = ?`,
+          [
+            diplomaNormalizado.nombre,
+            diplomaNormalizado.apellido,
+            diplomaNormalizado.tipo_identificacion,
+            diplomaNormalizado.numero_identificacion,
+            diplomaNormalizado.tipo_diploma,
+            diplomaNormalizado.nombre_tipo_diploma,
+            diplomaNormalizado.modalidad,
+            diplomaNormalizado.fecha_grado,
+            diplomaNormalizado.libro,
+            diplomaNormalizado.acta,
+            diplomaNormalizado.referencia,
+            diplomaNormalizado.telefono,
+            diplomaNormalizado.correo,
+            diplomaNormalizado.estado,
+            diplomaNormalizado.valor,
+            diplomaNormalizado.valor_cop,
+            diplomaId
+          ]
+        );
+        
+        console.log(`✅ Diploma actualizado: ${diplomaNormalizado.nombre} ${diplomaNormalizado.apellido} - ${diplomaNormalizado.tipo_diploma}`);
+      } else {
+        // Insertar nuevo diploma
+        await db.promise().query(
+          `INSERT INTO diploma (
+            nombre,
+            apellido,
+            tipo_identificacion,
+            numero_identificacion,
+            tipo_diploma,
+            nombre_tipo_diploma,
+            modalidad,
+            fecha_grado,
+            libro,
+            acta,
+            referencia,
+            telefono,
+            correo,
+            estado,
+            valor,
+            valor_cop,
+            created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+          [
+            diplomaNormalizado.nombre,
+            diplomaNormalizado.apellido,
+            diplomaNormalizado.tipo_identificacion,
+            diplomaNormalizado.numero_identificacion,
+            diplomaNormalizado.tipo_diploma,
+            diplomaNormalizado.nombre_tipo_diploma,
+            diplomaNormalizado.modalidad,
+            diplomaNormalizado.fecha_grado,
+            diplomaNormalizado.libro,
+            diplomaNormalizado.acta,
+            diplomaNormalizado.referencia,
+            diplomaNormalizado.telefono,
+            diplomaNormalizado.correo,
+            diplomaNormalizado.estado,
+            diplomaNormalizado.valor,
+            diplomaNormalizado.valor_cop
+          ]
+        );
+        
+        console.log(`✅ Nuevo diploma creado: ${diplomaNormalizado.nombre} ${diplomaNormalizado.apellido} - ${diplomaNormalizado.tipo_diploma}`);
+      }
+      
+      resultados.exitosos++;
+      
+    } catch (error) {
+      resultados.fallidos++;
+      resultados.errores.push(
+        `Error procesando diploma para ${diploma.nombre || 'desconocido'} ${diploma.apellido || ''} (${diploma.numero_identificacion || 'sin documento'}): ${error.message}`
+      );
+      console.error('❌ Error procesando diploma:', error);
+    }
+  }
+}
+
+//  FIN DE CARGA DE DOCUMENTOS CON EXCEL //
+
 
 // NOTAS Y PROGRAMAS // 
 
