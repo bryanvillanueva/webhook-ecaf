@@ -770,7 +770,123 @@ app.get('/api/certificados/:id/datos-notas', async (req, res) => {
   }
 });
 
+// Endpoint para obtener datos completos para certificado de estudio
+app.get('/api/certificados/:id/datos-estudio', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // 1. Obtener información básica del certificado
+    const [certificado] = await db.promise().query(`
+      SELECT * FROM certificados 
+      WHERE id = ? AND tipo_certificado = 'certificado de estudio'
+    `, [id]);
+    
+    if (certificado.length === 0) {
+      return res.status(404).json({ error: 'Certificado de estudio no encontrado' });
+    }
+    
+    const certData = certificado[0];
+    
+    // 2. Mapear tipo de documento para buscar estudiante
+    const tipoDocumentoMapeado = mapearTipoDocumento(certData.tipo_identificacion);
+    
+    // 3. Buscar estudiante en la base de datos
+    const [estudiante] = await db.promise().query(`
+      SELECT id_estudiante, nombres, apellidos 
+      FROM estudiantes 
+      WHERE tipo_documento = ? AND numero_documento = ?
+    `, [tipoDocumentoMapeado, certData.numero_identificacion]);
+    
+    if (estudiante.length === 0) {
+      return res.status(404).json({ error: 'Estudiante no encontrado' });
+    }
+    
+    const estudianteId = estudiante[0].id_estudiante;
+    
+    // 4. Obtener todos los programas del estudiante (activos y culminados)
+    const [programasEstudiante] = await db.promise().query(`
+      SELECT 
+        p.Id_Programa,
+        p.Nombre_programa,
+        p.Fecha_Inicio_programa,
+        p.Fecha_Fin_programa,
+        p.Estado as estado_programa,
+        ep.Fecha_Inicio,
+        ep.Fecha_Fin,
+        ep.Estado as estado_matricula,
+        DATEDIFF(COALESCE(ep.Fecha_Fin, CURDATE()), ep.Fecha_Inicio) as dias_duracion
+      FROM estudiante_programa ep
+      JOIN programas p ON ep.Id_Programa = p.Id_Programa
+      WHERE ep.id_estudiante = ?
+      ORDER BY ep.Fecha_Inicio DESC
+    `, [estudianteId]);
+    
+    if (programasEstudiante.length === 0) {
+      return res.status(404).json({ 
+        error: 'El estudiante no está matriculado en ningún programa' 
+      });
+    }
+    
+    // 5. Formatear información de programas
+    const programasFormateados = programasEstudiante.map(programa => {
+      // Calcular duración aproximada en meses
+      const duracionMeses = Math.round(programa.dias_duracion / 30);
+      
+      return {
+        id: programa.Id_Programa,
+        nombre: programa.Nombre_programa,
+        fechaInicio: programa.Fecha_Inicio,
+        fechaFin: programa.Fecha_Fin,
+        estado: programa.estado_matricula,
+        duracion: duracionMeses > 0 ? `${duracionMeses} meses` : 'En curso',
+        estadoPrograma: programa.estado_programa
+      };
+    });
+    
+    // 6. Preparar respuesta
+    const response = {
+      certificado: {
+        id: certData.id,
+        referencia: certData.referencia,
+        nombre: certData.nombre,
+        apellido: certData.apellido,
+        tipo_identificacion: certData.tipo_identificacion,
+        numero_identificacion: certData.numero_identificacion,
+        correo: certData.correo,
+        telefono: certData.telefono,
+        fecha_creacion: certData.created_at
+      },
+      estudiante: {
+        nombres: estudiante[0].nombres,
+        apellidos: estudiante[0].apellidos
+      },
+      programa: programasFormateados[0], // Tomamos el primer programa (el más reciente)
+      // También podríamos devolver todos los programas si se necesita
+      todosLosProgramas: programasFormateados
+    };
+    
+    res.json(response);
+    
+  } catch (error) {
+    console.error('❌ Error al obtener datos para certificado de estudio:', error.message);
+    res.status(500).json({ 
+      error: 'Error al obtener datos del certificado de estudio',
+      details: error.message 
+    });
+  }
+});
 
+// Función auxiliar para mapear tipos de documento
+function mapearTipoDocumento(tipoCertificado) {
+  const mapeo = {
+    'Cédula de ciudadanía': 'CC',
+    'Tarjeta de identidad': 'TI',
+    'Cédula de extranjería': 'CE',
+    'Pasaporte': 'PA'
+  };
+  
+  return mapeo[tipoCertificado] || tipoCertificado;
+}
 
 
 // Endpoint para obtener información del dashboard de certificados
