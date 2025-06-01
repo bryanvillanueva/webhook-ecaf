@@ -801,11 +801,11 @@ app.get('/api/certificados/:id/datos-estudio', async (req, res) => {
       });
     }
     
-    // 3. Mapear tipo de documento para buscar estudiante
+    // 3. Mapear tipo de documento para buscar estudiante (certificados usa nombre completo, estudiantes usa abreviación)
     const tipoDocumentoMapeado = mapearTipoDocumento(certData.tipo_identificacion);
     console.log(`🔄 Mapeando tipo documento: "${certData.tipo_identificacion}" → "${tipoDocumentoMapeado}"`);
     
-    // 4. Buscar estudiante en la base de datos
+    // 4. Buscar estudiante en la base de datos usando el tipo mapeado
     const [estudiante] = await db.promise().query(`
       SELECT id_estudiante, nombres, apellidos 
       FROM estudiantes 
@@ -814,9 +814,12 @@ app.get('/api/certificados/:id/datos-estudio', async (req, res) => {
     
     if (estudiante.length === 0) {
       console.log(`❌ Estudiante no encontrado: ${tipoDocumentoMapeado} ${certData.numero_identificacion}`);
+      console.log(`📋 Búsqueda realizada con: tipo_documento="${tipoDocumentoMapeado}", numero_documento="${certData.numero_identificacion}"`);
       return res.status(404).json({ 
         error: 'Estudiante no encontrado',
-        detalles: `No se encontró estudiante con ${tipoDocumentoMapeado}: ${certData.numero_identificacion}`
+        detalles: `No se encontró estudiante con ${tipoDocumentoMapeado}: ${certData.numero_identificacion}`,
+        tipoOriginal: certData.tipo_identificacion,
+        tipoMapeado: tipoDocumentoMapeado
       });
     }
     
