@@ -770,27 +770,42 @@ app.get('/api/certificados/:id/datos-notas', async (req, res) => {
   }
 });
 
-// Endpoint para obtener datos completos para certificado de estudio
+// Endpoint para obtener datos completos para certificado de estudio - VERSIÓN CORREGIDA
 app.get('/api/certificados/:id/datos-estudio', async (req, res) => {
   try {
     const { id } = req.params;
     
-    // 1. Obtener información básica del certificado
+    console.log(`🔍 Solicitando datos de estudio para certificado ID: ${id}`);
+    
+    // 1. Obtener información básica del certificado (SIN filtrar por tipo inicialmente)
     const [certificado] = await db.promise().query(`
       SELECT * FROM certificados 
-      WHERE id = ? AND tipo_certificado = 'certificado de estudio'
+      WHERE id = ?
     `, [id]);
     
     if (certificado.length === 0) {
-      return res.status(404).json({ error: 'Certificado de estudio no encontrado' });
+      console.log(`❌ Certificado con ID ${id} no encontrado`);
+      return res.status(404).json({ error: `Certificado con ID ${id} no encontrado` });
     }
     
     const certData = certificado[0];
+    console.log(`📋 Certificado encontrado. Tipo: "${certData.tipo_certificado}"`);
     
-    // 2. Mapear tipo de documento para buscar estudiante
+    // 2. Verificar que sea un certificado de estudio DESPUÉS de encontrarlo
+    if (certData.tipo_certificado !== 'certificado de estudio') {
+      console.log(`❌ Tipo incorrecto. Esperado: "certificado de estudio", Actual: "${certData.tipo_certificado}"`);
+      return res.status(400).json({ 
+        error: `Este endpoint es solo para certificados de estudio`,
+        tipoActual: certData.tipo_certificado,
+        tipoEsperado: 'certificado de estudio'
+      });
+    }
+    
+    // 3. Mapear tipo de documento para buscar estudiante
     const tipoDocumentoMapeado = mapearTipoDocumento(certData.tipo_identificacion);
+    console.log(`🔄 Mapeando tipo documento: "${certData.tipo_identificacion}" → "${tipoDocumentoMapeado}"`);
     
-    // 3. Buscar estudiante en la base de datos
+    // 4. Buscar estudiante en la base de datos
     const [estudiante] = await db.promise().query(`
       SELECT id_estudiante, nombres, apellidos 
       FROM estudiantes 
@@ -798,12 +813,17 @@ app.get('/api/certificados/:id/datos-estudio', async (req, res) => {
     `, [tipoDocumentoMapeado, certData.numero_identificacion]);
     
     if (estudiante.length === 0) {
-      return res.status(404).json({ error: 'Estudiante no encontrado' });
+      console.log(`❌ Estudiante no encontrado: ${tipoDocumentoMapeado} ${certData.numero_identificacion}`);
+      return res.status(404).json({ 
+        error: 'Estudiante no encontrado',
+        detalles: `No se encontró estudiante con ${tipoDocumentoMapeado}: ${certData.numero_identificacion}`
+      });
     }
     
     const estudianteId = estudiante[0].id_estudiante;
+    console.log(`✅ Estudiante encontrado: ${estudiante[0].nombres} ${estudiante[0].apellidos} (ID: ${estudianteId})`);
     
-    // 4. Obtener todos los programas del estudiante (activos y culminados)
+    // 5. Obtener todos los programas del estudiante (activos y culminados)
     const [programasEstudiante] = await db.promise().query(`
       SELECT 
         p.Id_Programa,
@@ -822,12 +842,16 @@ app.get('/api/certificados/:id/datos-estudio', async (req, res) => {
     `, [estudianteId]);
     
     if (programasEstudiante.length === 0) {
+      console.log(`❌ No se encontraron programas para el estudiante ID: ${estudianteId}`);
       return res.status(404).json({ 
-        error: 'El estudiante no está matriculado en ningún programa' 
+        error: 'El estudiante no está matriculado en ningún programa',
+        estudianteId: estudianteId
       });
     }
     
-    // 5. Formatear información de programas
+    console.log(`📚 Se encontraron ${programasEstudiante.length} programa(s) para el estudiante`);
+    
+    // 6. Formatear información de programas
     const programasFormateados = programasEstudiante.map(programa => {
       // Calcular duración aproximada en meses
       const duracionMeses = Math.round(programa.dias_duracion / 30);
@@ -843,7 +867,7 @@ app.get('/api/certificados/:id/datos-estudio', async (req, res) => {
       };
     });
     
-    // 6. Preparar respuesta
+    // 7. Preparar respuesta
     const response = {
       certificado: {
         id: certData.id,
@@ -861,22 +885,24 @@ app.get('/api/certificados/:id/datos-estudio', async (req, res) => {
         apellidos: estudiante[0].apellidos
       },
       programa: programasFormateados[0], // Tomamos el primer programa (el más reciente)
-      // También podríamos devolver todos los programas si se necesita
+      // También devolvemos todos los programas por si se necesitan
       todosLosProgramas: programasFormateados
     };
     
+    console.log(`✅ Respuesta preparada exitosamente para certificado ${id}`);
     res.json(response);
     
   } catch (error) {
     console.error('❌ Error al obtener datos para certificado de estudio:', error.message);
+    console.error('❌ Stack trace:', error.stack);
     res.status(500).json({ 
-      error: 'Error al obtener datos del certificado de estudio',
+      error: 'Error interno del servidor al obtener datos del certificado de estudio',
       details: error.message 
     });
   }
 });
 
-// Función auxiliar para mapear tipos de documento
+// Función auxiliar para mapear tipos de documento - SIN CAMBIOS
 function mapearTipoDocumento(tipoCertificado) {
   const mapeo = {
     'Cédula de ciudadanía': 'CC',
@@ -887,7 +913,6 @@ function mapearTipoDocumento(tipoCertificado) {
   
   return mapeo[tipoCertificado] || tipoCertificado;
 }
-
 
 // Endpoint para obtener información del dashboard de certificados
 // Endpoint modificado para incluir cálculos financieros
