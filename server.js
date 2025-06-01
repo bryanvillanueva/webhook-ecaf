@@ -770,7 +770,6 @@ app.get('/api/certificados/:id/datos-notas', async (req, res) => {
   }
 });
 
-// Endpoint para obtener datos completos para certificado de estudio - VERSIÓN CORREGIDA
 app.get('/api/certificados/:id/datos-estudio', async (req, res) => {
   try {
     const { id } = req.params;
@@ -826,24 +825,49 @@ app.get('/api/certificados/:id/datos-estudio', async (req, res) => {
     const estudianteId = estudiante[0].id_estudiante;
     console.log(`✅ Estudiante encontrado: ${estudiante[0].nombres} ${estudiante[0].apellidos} (ID: ${estudianteId})`);
     
-    // 5. Obtener todos los programas del estudiante (activos y culminados)
-    const [programasEstudiante] = await db.promise().query(`
-      SELECT 
-        p.Id_Programa,
-        p.Nombre_programa,
-        p.Fecha_Inicio_programa,
-        p.Fecha_Fin_programa,
-        p.Estado as estado_programa,
-        ep.Fecha_Inicio,
-        ep.Fecha_Fin,
-        ep.Estado as estado_matricula,
-        DATEDIFF(COALESCE(ep.Fecha_Fin, CURDATE()), ep.Fecha_Inicio) as dias_duracion
-      FROM estudiante_programa ep
-      JOIN programas p ON ep.Id_Programa = p.Id_Programa
-      WHERE ep.id_estudiante = ?
-      ORDER BY ep.Fecha_Inicio DESC
-    `, [estudianteId]);
+    // 5. Obtener todos los programas del estudiante (ahora con módulos y asignaturas)
+    const [programasEstudiante] = await db
+      .promise()
+      .query(
+        `
+        SELECT 
+          p.Id_Programa,
+          p.Nombre_programa,
+          p.Fecha_Inicio_programa,
+          p.Fecha_Fin_programa,
+          p.Estado AS estado_programa,
+          ep.Fecha_Inicio AS Fecha_Inicio_Matricula,
+          ep.Fecha_Fin   AS Fecha_Fin_Matricula,
+          ep.Estado      AS estado_matricula,
+          DATEDIFF(
+            COALESCE(ep.Fecha_Fin, CURDATE()), 
+            ep.Fecha_Inicio
+          ) AS dias_duracion,
+          -- Campos de módulo
+          m.Id_Modulo,
+          m.Nombre_modulo,
+          m.Fecha_Inicio_modulo,
+          m.Fecha_Fin_modulo,
+          -- Campos de asignatura
+          a.Id_Asignatura,
+          a.Nombre_asignatura
+        FROM estudiante_programa ep
+        JOIN programas p 
+          ON ep.Id_Programa = p.Id_Programa
+        LEFT JOIN modulos m 
+          ON m.Id_Programa = p.Id_Programa
+        LEFT JOIN asignaturas a 
+          ON a.Id_Modulo = m.Id_Modulo
+        WHERE ep.id_estudiante = ?
+        ORDER BY 
+          ep.Fecha_Inicio DESC,
+          m.Id_Modulo,
+          a.Id_Asignatura
+        `,
+        [estudianteId]
+      );
     
+    // **Validación que faltaba**: si no hay programas, devolvemos 404 como antes
     if (programasEstudiante.length === 0) {
       console.log(`❌ No se encontraron programas para el estudiante ID: ${estudianteId}`);
       return res.status(404).json({ 
@@ -854,21 +878,62 @@ app.get('/api/certificados/:id/datos-estudio', async (req, res) => {
     
     console.log(`📚 Se encontraron ${programasEstudiante.length} programa(s) para el estudiante`);
     
-    // 6. Formatear información de programas
-    const programasFormateados = programasEstudiante.map(programa => {
-      // Calcular duración aproximada en meses
-      const duracionMeses = Math.round(programa.dias_duracion / 30);
-      
-      return {
-        id: programa.Id_Programa,
-        nombre: programa.Nombre_programa,
-        fechaInicio: programa.Fecha_Inicio,
-        fechaFin: programa.Fecha_Fin,
-        estado: programa.estado_matricula,
-        duracion: duracionMeses > 0 ? `${duracionMeses} meses` : 'En curso',
-        estadoPrograma: programa.estado_programa
-      };
-    });
+    // 6. Reagrupar filas planas en una estructura anidada
+    const programasMap = new Map();
+    
+    for (const fila of programasEstudiante) {
+      const progId = fila.Id_Programa;
+    
+      // Si aún no existe el programa en el Map, crear la plantilla
+      if (!programasMap.has(progId)) {
+        programasMap.set(progId, {
+          id: fila.Id_Programa,
+          nombre: fila.Nombre_programa,
+          fechaInicio: fila.Fecha_Inicio_programa,
+          fechaFin: fila.Fecha_Fin_programa,
+          estadoPrograma: fila.estado_programa,
+          fechaInicioMatricula: fila.Fecha_Inicio_Matricula,
+          fechaFinMatricula: fila.Fecha_Fin_Matricula,
+          diasDuracion:
+            Math.round(fila.dias_duracion / 30) > 0
+              ? `${Math.round(fila.dias_duracion / 30)} meses`
+              : "En curso",
+          estadoMatricula: fila.estado_matricula,
+          modulos: []
+        });
+      }
+    
+      const programaActual = programasMap.get(progId);
+    
+      // Si la fila tiene módulo (Id_Modulo no nulo)...
+      if (fila.Id_Modulo !== null) {
+        // Verificamos si ya habíamos agregado este módulo al programa
+        let moduloActual = programaActual.modulos.find(
+          (m) => m.idModulo === fila.Id_Modulo
+        );
+        if (!moduloActual) {
+          moduloActual = {
+            idModulo: fila.Id_Modulo,
+            nombreModulo: fila.Nombre_modulo,
+            fechaInicioModulo: fila.Fecha_Inicio_modulo,
+            fechaFinModulo: fila.Fecha_Fin_modulo,
+            asignaturas: []
+          };
+          programaActual.modulos.push(moduloActual);
+        }
+    
+        // Si la fila tiene asignatura (Id_Asignatura no nulo)...
+        if (fila.Id_Asignatura !== null) {
+          moduloActual.asignaturas.push({
+            idAsignatura: fila.Id_Asignatura,
+            nombreAsignatura: fila.Nombre_asignatura
+          });
+        }
+      }
+    }
+    
+    // Convertimos el Map a un array de programas (en tu caso, normalmente solo habrá uno reciente)
+    const programasFormateados = Array.from(programasMap.values());
     
     // 7. Preparar respuesta
     const response = {
@@ -887,18 +952,17 @@ app.get('/api/certificados/:id/datos-estudio', async (req, res) => {
         nombres: estudiante[0].nombres,
         apellidos: estudiante[0].apellidos
       },
-      programa: programasFormateados[0], // Tomamos el primer programa (el más reciente)
-      // También devolvemos todos los programas por si se necesitan
-      todosLosProgramas: programasFormateados
+      programa: programasFormateados[0],      // Tomamos el primer (más reciente)
+      todosLosProgramas: programasFormateados // Incluye módulos y asignaturas
     };
     
     console.log(`✅ Respuesta preparada exitosamente para certificado ${id}`);
-    res.json(response);
+    return res.json(response);
     
   } catch (error) {
     console.error('❌ Error al obtener datos para certificado de estudio:', error.message);
     console.error('❌ Stack trace:', error.stack);
-    res.status(500).json({ 
+    return res.status(500).json({ 
       error: 'Error interno del servidor al obtener datos del certificado de estudio',
       details: error.message 
     });
@@ -913,7 +977,6 @@ function mapearTipoDocumento(tipoCertificado) {
     'Cédula de extranjería': 'CE',
     'Pasaporte': 'PA'
   };
-  
   return mapeo[tipoCertificado] || tipoCertificado;
 }
 
