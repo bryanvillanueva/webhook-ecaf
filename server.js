@@ -11,7 +11,8 @@ const bcryptjs = require('bcryptjs');
 const XLSX = require('xlsx');
 
 
-
+const messageBuffer = {}; // Almacena temporalmente mensajes por userId
+const WAIT_TIME = 20000; // 20 segundos
 
 const app = express();
 app.use(bodyParser.json());
@@ -19,17 +20,17 @@ app.use(cors());
 app.use(express.json({ extended: true }));
 app.use(express.urlencoded({ extended: true }));
 
+// Configuración de la base de datos principal usando variables de entorno
 const db = mysql.createPool({
-    host: 'srv1041.hstgr.io',
-    user: 'u255066530_ecafAdmin',
-    password: 'wZ>3QG:WBk|BS0l$$BjBA0E4y',
-    database: 'u255066530_ecaf',
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
     charset: 'utf8mb4'
-}); 
-
+});
 // Importa Socket.IO y configura el servidor HTTP
 const http = require('http');
 const server = http.createServer(app);
@@ -50,28 +51,34 @@ const io = new Server(server, {
 });
 
 
-// Mejorar los logs de conexión/desconexión
+/// Mejorar los logs de conexión/desconexión
 io.on('connection', (socket) => {
   console.log('🔌 Cliente conectado a Socket.IO:', socket.id, 'desde IP:', socket.handshake.address);
   
-  // Puedes añadir un ping/pong personalizado para verificar la conexión
   socket.on('ping', (callback) => {
     if (callback && typeof callback === 'function') {
       callback({ status: 'ok', timestamp: new Date() });
     }
   });
 
-  // Monitorear desconexiones con la razón
   socket.on('disconnect', (reason) => {
     console.log('🔌 Cliente desconectado de Socket.IO:', socket.id, 'Razón:', reason);
   });
   
-  // Manejar errores de socket
   socket.on('error', (error) => {
     console.error('🔌 Error de socket:', socket.id, error);
   });
 });
 
+// Verifica la conexión a la base de datos principal
+db.getConnection((err, connection) => {
+    if (err) {
+        console.error('❌ Error al conectar a la base de datos:', err.message);
+    } else {
+        console.log('✅ Conectado a la base de datos MySQL');
+        connection.release();
+    }
+});
 // Verifica la conexión a la base de datos
 db.getConnection((err, connection) => {
     if (err) {
@@ -82,14 +89,14 @@ db.getConnection((err, connection) => {
     }
 }); 
 
-// Crear una conexión a la segunda base de datos (GoDaddy)
+// Configuración de la base de datos de autenticación usando variables de entorno (Go daddy MySQL)
 const authDB = mysql.createPool({
-  host: '192.169.145.218',      // Reemplaza con la dirección de tu servidor GoDaddy
-  user: 'plataforma',                    // Reemplaza con tu usuario
-  password: 'NR22gBzwXtkje4a',             // Reemplaza con tu contraseña 
-  database: 'ecaf_plataforma', // Reemplaza con el nombre de tu base de datos
+  host: process.env.AUTH_DB_HOST,
+  user: process.env.AUTH_DB_USER,
+  password: process.env.AUTH_DB_PASSWORD,
+  database: process.env.AUTH_DB_NAME,
   waitForConnections: true,
-  connectionLimit: 5,                    // Menor límite de conexiones para autenticación
+  connectionLimit: 5,
   queueLimit: 0,
   charset: 'utf8mb4'
 });
@@ -113,26 +120,14 @@ cloudinary.config({
 
 
 
- // Configurar Cloudinary con variables de entorno
-cloudinary.config({
-  cloud_name: process.env.CLOUD_NAME,
-  api_key: process.env.API_KEY,
-  api_secret: process.env.API_SECRET
-}) 
-
-
-
-
  // Configure multer to store the file in memory
-
 const storage = multer.memoryStorage();
-
-const upload = multer({ storage }); // Esto es necesario */
+const upload = multer({ storage }); 
 
 // Token de verificación
-const PHONE_NUMBER_ID = '511705378704158';
-const VERIFY_TOKEN = 'Mi_Nuevo_Token_Secreto_ECAF';
-const ACCESS_TOKEN = 'EAAJZASnMRogsBOyBcSh7jSjwQCRYb3i5NeZBP1sN7KgpkEN8WhvMNEym2ocH2g97vh53ZAy9GiDpZCBhSvZAuZCZBaYf173O6NahZCB3AeKDq4gEDlwy1JKYgr02dQN5Xpbfw2dx5yNlQJie3n3QlgTO2xDIbeT1ZCWlRZC1GaTDZAcX8fKzUCoA6QDVJwlNUuySIlEOQZDZD'; // 
+const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
+const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
+const ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
 
 const fs = require('fs');
 
@@ -155,39 +150,104 @@ app.post('/webhook', async (req, res) => {
   const body = req.body;
 
   if (body.object) {
-      // Assume messages are in: body.entry[0].changes[0].value.messages
-      const messagesArray = body.entry?.[0]?.changes?.[0]?.value?.messages;
+    const messagesArray = body.entry?.[0]?.changes?.[0]?.value?.messages;
+    if (!Array.isArray(messagesArray) || messagesArray.length === 0) {
+      return res.status(400).send('No messages found');
+    }
 
-      // Determine message type
-      let messageType = 'text'; // default
-      if (Array.isArray(messagesArray)) {
-          const firstMessage = messagesArray[0];
-          if (firstMessage) {
-              messageType = firstMessage.type;
-          }
-      }
+    const message = messagesArray[0];
+    const messageType = message.type;
+    const userId = message.from;
 
-      // Choose target webhook URL based on message type
-      const webhookMap = {
-          'text': 'https://hook.eu2.make.com/ue8dxmxmuq6sr5own5yftq89ynethvqn',
-          'audio': 'https://hook.eu2.make.com/pch3avcjrya2et6gqol5vdoyh11txfrl',
-          'image': 'https://hook.eu2.make.com/dgxr45oyidtttvwbge4c1wjycnnlfj4y',
-          'document': 'https://hook.eu2.make.com/dgxr45oyidtttvwbge4c1wjycnnlfj4y'
-      };
-
-      // Default to text webhook if type is not recognized
-      const targetWebhook = webhookMap[messageType] || webhookMap['text'];
-
+    // Función para enviar a Make y limpiar buffer
+    const sendToMake = async (payload, webhookUrl) => {
       try {
-          const makeResponse = await axios.post(targetWebhook, body);
-          console.log('✅ Mensaje enviado a Make:', makeResponse.status, 'Webhook:', targetWebhook);
+        const makeResponse = await axios.post(webhookUrl, payload);
+        console.log('✅ Mensaje enviado a Make:', makeResponse.status, 'Webhook:', webhookUrl);
       } catch (error) {
-          console.error('❌ Error al enviar mensaje a Make:', error.message);
+        console.error('❌ Error al enviar mensaje a Make:', error.message);
       }
+    };
 
-      res.status(200).send('EVENT_RECEIVED');
+    // Webhooks por tipo
+    const webhookMap = {
+      'text': 'https://hook.eu2.make.com/ue8dxmxmuq6sr5own5yftq89ynethvqn',
+      'audio': 'https://hook.eu2.make.com/pch3avcjrya2et6gqol5vdoyh11txfrl',
+      'image': 'https://hook.eu2.make.com/dgxr45oyidtttvwbge4c1wjycnnlfj4y',
+      'document': 'https://hook.eu2.make.com/dgxr45oyidtttvwbge4c1wjycnnlfj4y'
+    };
+
+    if (messageType === 'image') {
+      // Si es imagen, guarda el mensaje en buffer y espera 20 seg para ver si llega texto relacionado
+      messageBuffer[userId] = {
+        imageMessage: message,
+        textMessage: null,
+        timeout: setTimeout(async () => {
+          // Pasados 20 seg sin texto, enviar solo imagen sin caption
+          const payload = {
+            ...body,
+            entry: [{
+              ...body.entry[0],
+              changes: [{
+                ...body.entry[0].changes[0],
+                value: {
+                  ...body.entry[0].changes[0].value,
+                  messages: [messageBuffer[userId].imageMessage]
+                }
+              }]
+            }]
+          };
+          await sendToMake(payload, webhookMap['image']);
+          delete messageBuffer[userId];
+        }, WAIT_TIME)
+      };
+      return res.status(200).send('EVENT_RECEIVED');
+    }
+
+    if (messageType === 'text') {
+      // Si hay imagen previa en buffer para este userId, combinamos el texto como caption y enviamos
+      if (messageBuffer[userId] && messageBuffer[userId].imageMessage) {
+        clearTimeout(messageBuffer[userId].timeout);
+
+        // Modificamos el mensaje de imagen para agregar caption con el texto recibido
+        const combinedImageMessage = {
+          ...messageBuffer[userId].imageMessage,
+          image: {
+            ...messageBuffer[userId].imageMessage.image,
+            caption: message.text.body
+          }
+        };
+
+        const payload = {
+          ...body,
+          entry: [{
+            ...body.entry[0],
+            changes: [{
+              ...body.entry[0].changes[0],
+              value: {
+                ...body.entry[0].changes[0].value,
+                messages: [combinedImageMessage]
+              }
+            }]
+          }]
+        };
+
+        await sendToMake(payload, webhookMap['image']);
+        delete messageBuffer[userId];
+        return res.status(200).send('EVENT_RECEIVED');
+      } else {
+        // No hay imagen previa, enviamos texto normalmente
+        await sendToMake(body, webhookMap['text']);
+        return res.status(200).send('EVENT_RECEIVED');
+      }
+    }
+
+    // Para otros tipos (audio, documento) enviar normal sin buffer
+    const targetWebhook = webhookMap[messageType] || webhookMap['text'];
+    await sendToMake(body, targetWebhook);
+    return res.status(200).send('EVENT_RECEIVED');
   } else {
-      res.status(404).send('No encontrado');
+    res.status(404).send('No encontrado');
   }
 });
 
