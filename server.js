@@ -2799,9 +2799,6 @@ function mapearTipoDocumento(tipoCompleto) {
   return mapeo[tipoCompleto] || tipoCompleto;
 }
 
-// ENDPOINT PARA VALIDAR REQUISITOS ACTUALIZADO
-// ENDPOINT PARA VALIDAR REQUISITOS - VERSIÓN FINAL CORREGIDA
-// Reemplazar el endpoint existente /api/certificados/validar-requisitos
 
 // ==========================================
 // VALIDACIÓN SIMPLIFICADA - SIN MAPEO PARA DIPLOMAS
