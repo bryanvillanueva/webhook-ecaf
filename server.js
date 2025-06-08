@@ -723,7 +723,206 @@ app.get('/api/dashboard-info', (req, res) => {
     });
   });
   
+
+
 // ENDPOINTS PARA LA GENERACION DE LOS CERTIFICADOS (DESCARGABLES EN PDF)
+
+// ==========================================
+// NUEVAS FUNCIONES PARA VALIDACIÓN DE DIPLOMAS
+// ==========================================
+
+// Función para buscar diploma en la tabla diploma
+async function buscarDiplomaEnTabla(tipoIdentificacion, numeroIdentificacion, requiereEstadoPendiente = true) {
+  try {
+    // Mapear el tipo de identificación si es necesario
+    const tipoDocumentoMapeado = mapearTipoDocumentoParaDiplomas(tipoIdentificacion);
+    
+    console.log(`🔍 Buscando diploma: ${tipoIdentificacion} (${tipoDocumentoMapeado}) - ${numeroIdentificacion}`);
+    
+    // Buscar en la tabla diploma
+    const [diplomas] = await db.promise().query(`
+      SELECT 
+        id,
+        nombre,
+        apellido,
+        tipo_identificacion,
+        numero_identificacion,
+        tipo_diploma,
+        nombre_tipo_diploma,
+        modalidad,
+        fecha_grado,
+        libro,
+        acta,
+        referencia,
+        telefono,
+        correo,
+        estado,
+        valor,
+        valor_cop,
+        created_at
+      FROM diploma 
+      WHERE numero_identificacion = ? 
+      AND (tipo_identificacion = ? OR tipo_identificacion = ?)
+    `, [numeroIdentificacion, tipoIdentificacion, tipoDocumentoMapeado]);
+    
+    if (diplomas.length === 0) {
+      console.log(`❌ No se encontró diploma para: ${tipoIdentificacion} ${numeroIdentificacion}`);
+      return {
+        encontrado: false,
+        mensaje: 'No se encontró un diploma registrado para este documento',
+        diplomas: []
+      };
+    }
+    
+    console.log(`✅ Se encontraron ${diplomas.length} diploma(s) para el documento`);
+    
+    // Filtrar por estado si se requiere
+    let diplomasValidos = diplomas;
+    if (requiereEstadoPendiente) {
+      diplomasValidos = diplomas.filter(d => d.estado && d.estado.toUpperCase() === 'PENDIENTE');
+      
+      if (diplomasValidos.length === 0) {
+        const estadosEncontrados = diplomas.map(d => d.estado).join(', ');
+        return {
+          encontrado: false,
+          mensaje: 'No hay diplomas en estado PENDIENTE para este documento',
+          detalles: `Estados encontrados: ${estadosEncontrados}. Para solicitar un diploma de grado, debe tener al menos un diploma en estado PENDIENTE.`,
+          diplomas: diplomas
+        };
+      }
+    } else {
+      // Para duplicado, buscar diplomas ENTREGADOS
+      diplomasValidos = diplomas.filter(d => d.estado && d.estado.toUpperCase() === 'ENTREGADO');
+      
+      if (diplomasValidos.length === 0) {
+        const estadosEncontrados = diplomas.map(d => d.estado).join(', ');
+        return {
+          encontrado: false,
+          mensaje: 'No hay diplomas en estado ENTREGADO para este documento',
+          detalles: `Estados encontrados: ${estadosEncontrados}. Para solicitar un duplicado de diploma, debe tener al menos un diploma en estado ENTREGADO.`,
+          diplomas: diplomas
+        };
+      }
+    }
+    
+    return {
+      encontrado: true,
+      mensaje: `Se encontraron ${diplomasValidos.length} diploma(s) válido(s)`,
+      diplomas: diplomasValidos
+    };
+    
+  } catch (error) {
+    console.error('❌ Error al buscar diploma en tabla:', error.message);
+    throw error;
+  }
+}
+
+// Función para mapear tipos de documento específicamente para diplomas
+function mapearTipoDocumentoParaDiplomas(tipoCompleto) {
+  const mapeoCompleto = {
+    // Mapeos desde nombre completo hacia abreviaciones
+    'Cédula de ciudadanía': 'CC',
+    'Tarjeta de Identidad': 'TI',
+    'Tarjeta de identidad': 'TI', // variación
+    'Pasaporte': 'PP',
+    'PEP': 'PA',
+    'Cédula de extranjería': 'CE',
+    
+    // Mapeos desde abreviaciones hacia nombres completos (por si acaso)
+    'CC': 'Cédula de ciudadanía',
+    'TI': 'Tarjeta de Identidad',
+    'PP': 'Pasaporte', 
+    'PA': 'PEP',
+    'CE': 'Cédula de extranjería'
+  };
+  
+  return mapeoCompleto[tipoCompleto] || tipoCompleto;
+}
+
+// 4. Validación ACTUALIZADA para Diploma de Grado (usando tabla diploma)
+async function validarDiplomaGrado(estudianteId, tipoIdentificacion, numeroIdentificacion) {
+  try {
+    console.log(`🎓 Validando diploma de grado para documento: ${tipoIdentificacion} ${numeroIdentificacion}`);
+    
+    // Buscar diplomas en estado PENDIENTE en la tabla diploma
+    const resultadoBusqueda = await buscarDiplomaEnTabla(tipoIdentificacion, numeroIdentificacion, true);
+    
+    if (!resultadoBusqueda.encontrado) {
+      return {
+        esValido: false,
+        mensaje: resultadoBusqueda.mensaje,
+        detalles: resultadoBusqueda.detalles || 'Debe tener al menos un diploma en estado PENDIENTE para poder solicitar el diploma de grado.',
+        precio: 0
+      };
+    }
+    
+    const diplomasValidos = resultadoBusqueda.diplomas;
+    
+    // Obtener información del primer diploma válido (o combinar si hay varios)
+    const diplomas = diplomasValidos.map(d => `${d.tipo_diploma} - ${d.nombre_tipo_diploma}`).join(', ');
+    const valorTotal = diplomasValidos.reduce((sum, d) => sum + (Number(d.valor) || Number(d.valor_cop) || 0), 0);
+    
+    return {
+      esValido: true,
+      mensaje: `Diploma de grado válido para: ${diplomas}`,
+      estadoInicial: 'pendiente',
+      precio: valorTotal > 0 ? valorTotal : 295680, // Usar valor de tabla o precio por defecto
+      detalles: `Se encontraron ${diplomasValidos.length} diploma(s) pendiente(s) de entrega`,
+      diplomasEncontrados: diplomasValidos
+    };
+    
+  } catch (error) {
+    console.error('❌ Error en validación de diploma de grado:', error.message);
+    return {
+      esValido: false,
+      mensaje: 'Error técnico al validar los requisitos del diploma de grado',
+      detalles: `No se pudieron verificar los requisitos debido a un error del sistema. Contacte al soporte técnico. Error: ${error.message}`,
+      precio: 0
+    };
+  }
+}
+
+// 5. Validación ACTUALIZADA para Duplicado de Diploma (usando tabla diploma)
+async function validarDuplicadoDiploma(estudianteId, tipoIdentificacion, numeroIdentificacion) {
+  try {
+    console.log(`📋 Validando duplicado de diploma para documento: ${tipoIdentificacion} ${numeroIdentificacion}`);
+    
+    // Buscar diplomas en estado ENTREGADO en la tabla diploma
+    const resultadoBusqueda = await buscarDiplomaEnTabla(tipoIdentificacion, numeroIdentificacion, false);
+    
+    if (!resultadoBusqueda.encontrado) {
+      return {
+        esValido: false,
+        mensaje: resultadoBusqueda.mensaje,
+        detalles: resultadoBusqueda.detalles || 'Debe tener al menos un diploma en estado ENTREGADO para poder solicitar un duplicado.',
+        precio: 0
+      };
+    }
+    
+    const diplomasValidos = resultadoBusqueda.diplomas;
+    
+    // Obtener información de los diplomas
+    const diplomas = diplomasValidos.map(d => `${d.tipo_diploma} - ${d.nombre_tipo_diploma}`).join(', ');
+    
+    return {
+      esValido: true,
+      mensaje: `Duplicado de diploma válido para: ${diplomas}`,
+      estadoInicial: 'pendiente',
+      precio: 90000, // Precio fijo para duplicados
+      detalles: `Se encontraron ${diplomasValidos.length} diploma(s) entregado(s)`,
+      diplomasEncontrados: diplomasValidos
+    };
+    
+  } catch (error) {
+    console.error('❌ Error en validación de duplicado de diploma:', error.message);
+    return {
+      esValido: false,
+      mensaje: 'Error técnico al validar los requisitos del duplicado de diploma',
+      detalles: `No se pudieron verificar los requisitos debido a un error del sistema. Contacte al soporte técnico. Error: ${error.message}`,
+      precio: 0
+    };
+  }
+}
 
 // Endpoint para obtener datos completos para certificado de notas
 app.get('/api/certificados/:id/datos-notas', async (req, res) => {
@@ -1965,28 +2164,48 @@ app.post('/api/certificados', async (req, res) => {
   }
 
   try {
-    // Mapear el tipo de documento para buscar en la tabla estudiantes
-    const tipoDocumentoMapeado = mapearTipoDocumento(tipo_identificacion);
+    console.log(`📝 Creando certificado de tipo: ${tipo_certificado}`);
     
-    // Re-validar que el estudiante existe (validación rápida)
-    const [estudiante] = await db.promise().query(
-      'SELECT id_estudiante FROM estudiantes WHERE tipo_documento = ? AND numero_documento = ?',
-      [tipoDocumentoMapeado, numero_identificacion]
-    );
+    const esDiploma = tipo_certificado.toLowerCase().includes('diploma');
+    let estudianteId = null;
+    let validacionResult;
 
-    if (estudiante.length === 0) {
-      return res.status(404).json({ 
-        error: 'Estudiante no encontrado'
-      });
+    if (!esDiploma) {
+      // Para certificados normales, validar estudiante
+      const tipoDocumentoMapeado = mapearTipoDocumento(tipo_identificacion);
+      
+      const [estudiante] = await db.promise().query(
+        'SELECT id_estudiante FROM estudiantes WHERE tipo_documento = ? AND numero_documento = ?',
+        [tipoDocumentoMapeado, numero_identificacion]
+      );
+
+      if (estudiante.length === 0) {
+        return res.status(404).json({ 
+          error: 'Estudiante no encontrado'
+        });
+      }
+
+      estudianteId = estudiante[0].id_estudiante;
+      
+      // Validar requisitos
+      validacionResult = await validarSolicitudCertificado(estudianteId, tipo_certificado);
+    } else {
+      // Para diplomas, validar directamente en tabla diploma
+      console.log(`🎓 Validando diploma para documento: ${tipo_identificacion} ${numero_identificacion}`);
+      
+      validacionResult = await validarSolicitudCertificado(
+        null, 
+        tipo_certificado, 
+        tipo_identificacion, 
+        numero_identificacion
+      );
     }
-
-    const estudianteId = estudiante[0].id_estudiante;
-    const validacionResult = await validarSolicitudCertificado(estudianteId, tipo_certificado);
     
     if (!validacionResult.esValido) {
       return res.status(400).json({ 
         error: 'No cumple los requisitos',
-        mensaje: validacionResult.mensaje
+        mensaje: validacionResult.mensaje,
+        detalles: validacionResult.detalles
       });
     }
 
@@ -2020,7 +2239,7 @@ app.post('/api/certificados', async (req, res) => {
     const proximoId = idResult[0].AUTO_INCREMENT;
     const referencia = `${prefijo}${proximoId}`;
 
-    // Insertar certificado - IMPORTANTE: Guardamos el tipo_identificacion completo en la tabla certificados
+    // Insertar certificado
     const sqlCertificado = `
       INSERT INTO certificados 
         (nombre, apellido, tipo_identificacion, numero_identificacion, tipo_certificado, referencia, telefono, correo, estado, valor)
@@ -2030,7 +2249,7 @@ app.post('/api/certificados', async (req, res) => {
     const [result] = await db.promise().query(sqlCertificado, [
       nombre, 
       apellido, 
-      tipo_identificacion, // Guardamos el nombre completo aquí
+      tipo_identificacion,
       numero_identificacion, 
       tipo_certificado, 
       referencia, 
@@ -2053,7 +2272,8 @@ app.post('/api/certificados', async (req, res) => {
   } catch (error) {
     console.error('❌ Error al crear certificado:', error.message);
     res.status(500).json({ 
-      error: 'Error interno del servidor'
+      error: 'Error interno del servidor',
+      detalles: error.message
     });
   }
 });
@@ -2169,7 +2389,7 @@ async function procesarEstudiantes(data, resultados) {
 
 // ENDPOINT PARA VALIDAR REQUISITOS ANTES DEL RESUMEN //
 // Función principal de validación
-async function validarSolicitudCertificado(estudianteId, tipoCertificado) {
+async function validarSolicitudCertificado(estudianteId, tipoCertificado, tipoIdentificacion = null, numeroIdentificacion = null) {
   try {
     switch (tipoCertificado.toLowerCase()) {
       case 'certificado de estudio':
@@ -2182,10 +2402,26 @@ async function validarSolicitudCertificado(estudianteId, tipoCertificado) {
         return await validarDuplicadoCursoCorto(estudianteId);
       
       case 'diploma de grado':
-        return await validarDiplomaGrado(estudianteId);
+        // ACTUALIZADO: Ahora requiere los datos del documento
+        if (!tipoIdentificacion || !numeroIdentificacion) {
+          return {
+            esValido: false,
+            mensaje: 'Se requieren los datos del documento para validar diploma de grado',
+            precio: 0
+          };
+        }
+        return await validarDiplomaGrado(estudianteId, tipoIdentificacion, numeroIdentificacion);
       
       case 'duplicado de diploma':
-        return await validarDuplicadoDiploma(estudianteId);
+        // ACTUALIZADO: Ahora requiere los datos del documento
+        if (!tipoIdentificacion || !numeroIdentificacion) {
+          return {
+            esValido: false,
+            mensaje: 'Se requieren los datos del documento para validar duplicado de diploma',
+            precio: 0
+          };
+        }
+        return await validarDuplicadoDiploma(estudianteId, tipoIdentificacion, numeroIdentificacion);
       
       default:
         return {
@@ -2203,7 +2439,6 @@ async function validarSolicitudCertificado(estudianteId, tipoCertificado) {
     };
   }
 }
-
 // 1. Validación para Certificado de Estudio
 async function validarCertificadoEstudio(estudianteId) {
   const [relaciones] = await db.promise().query(`
@@ -2573,51 +2808,82 @@ app.post('/api/certificados/validar-requisitos', async (req, res) => {
   }
 
   try {
-    // Mapear el tipo de documento completo a iniciales para buscar en la tabla estudiantes
-    const tipoDocumentoMapeado = mapearTipoDocumento(tipo_identificacion);
+    console.log(`🔍 Validando requisitos para: ${tipo_certificado} - ${tipo_identificacion} ${numero_identificacion}`);
     
-    console.log(`🔍 Buscando estudiante: ${tipo_identificacion} (${tipoDocumentoMapeado}) - ${numero_identificacion}`);
+    // Para diplomas, usar validación directa sin buscar en tabla estudiantes
+    const esDiploma = tipo_certificado.toLowerCase().includes('diploma');
     
-    // 1. Verificar que el estudiante existe usando las iniciales
-    const [estudiante] = await db.promise().query(
-      'SELECT id_estudiante, nombres, apellidos, tipo_documento FROM estudiantes WHERE tipo_documento = ? AND numero_documento = ?',
-      [tipoDocumentoMapeado, numero_identificacion]
-    );
+    let estudianteData = null;
+    let estudianteId = null;
+    
+    if (!esDiploma) {
+      // Para certificados normales, buscar en tabla estudiantes
+      const tipoDocumentoMapeado = mapearTipoDocumento(tipo_identificacion);
+      
+      console.log(`🔍 Buscando estudiante: ${tipo_identificacion} (${tipoDocumentoMapeado}) - ${numero_identificacion}`);
+      
+      const [estudiante] = await db.promise().query(
+        'SELECT id_estudiante, nombres, apellidos, tipo_documento FROM estudiantes WHERE tipo_documento = ? AND numero_documento = ?',
+        [tipoDocumentoMapeado, numero_identificacion]
+      );
 
-    if (estudiante.length === 0) {
-      console.log(`❌ Estudiante no encontrado con tipo: ${tipoDocumentoMapeado}, número: ${numero_identificacion}`);
-      return res.status(404).json({ 
-        esValido: false,
-        error: 'Estudiante no encontrado',
-        mensaje: 'No se encontró un estudiante con la identificación proporcionada.',
-        detalles: `Verifique que el tipo (${tipo_identificacion}) y número de identificación (${numero_identificacion}) sean correctos.`
-      });
+      if (estudiante.length === 0) {
+        console.log(`❌ Estudiante no encontrado con tipo: ${tipoDocumentoMapeado}, número: ${numero_identificacion}`);
+        return res.status(404).json({ 
+          esValido: false,
+          error: 'Estudiante no encontrado',
+          mensaje: 'No se encontró un estudiante con la identificación proporcionada.',
+          detalles: `Verifique que el tipo (${tipo_identificacion}) y número de identificación (${numero_identificacion}) sean correctos.`
+        });
+      }
+
+      estudianteData = estudiante[0];
+      estudianteId = estudianteData.id_estudiante;
+      
+      console.log(`✅ Estudiante encontrado: ${estudianteData.nombres} ${estudianteData.apellidos} (ID: ${estudianteId})`);
+    } else {
+      // Para diplomas, crear datos simulados para la respuesta
+      console.log(`🎓 Validando diploma directamente sin buscar estudiante`);
+      estudianteData = {
+        nombres: 'Usuario',
+        apellidos: 'Diploma',
+        id_estudiante: null
+      };
     }
 
-    const estudianteData = estudiante[0];
-    const estudianteId = estudianteData.id_estudiante;
+    // Aplicar validaciones según el tipo de certificado
+    const validacionResult = await validarSolicitudCertificado(
+      estudianteId, 
+      tipo_certificado, 
+      tipo_identificacion, 
+      numero_identificacion
+    );
     
-    console.log(`✅ Estudiante encontrado: ${estudianteData.nombres} ${estudianteData.apellidos} (ID: ${estudianteId})`);
-
-    // 2. Aplicar validaciones según el tipo de certificado
-    const validacionResult = await validarSolicitudCertificado(estudianteId, tipo_certificado);
-    
-    // 3. Responder con el resultado de la validación
+    // Responder con el resultado de la validación
     if (validacionResult.esValido) {
+      // Para diplomas, usar nombre del diploma encontrado si está disponible
+      let nombreCompleto = `${estudianteData.nombres} ${estudianteData.apellidos}`;
+      
+      if (esDiploma && validacionResult.diplomasEncontrados && validacionResult.diplomasEncontrados.length > 0) {
+        const primerDiploma = validacionResult.diplomasEncontrados[0];
+        nombreCompleto = `${primerDiploma.nombre} ${primerDiploma.apellido}`;
+      }
+      
       res.status(200).json({
         esValido: true,
         mensaje: validacionResult.mensaje,
         precio: validacionResult.precio,
         estadoInicial: validacionResult.estadoInicial,
-        estudianteNombre: `${estudianteData.nombres} ${estudianteData.apellidos}`,
-        detalles: validacionResult.detalles || 'Cumple todos los requisitos para este certificado'
+        estudianteNombre: nombreCompleto,
+        detalles: validacionResult.detalles || 'Cumple todos los requisitos para este certificado',
+        diplomasEncontrados: validacionResult.diplomasEncontrados || null
       });
     } else {
       res.status(400).json({
         esValido: false,
         mensaje: validacionResult.mensaje,
         detalles: validacionResult.detalles,
-        estudianteNombre: `${estudianteData.nombres} ${estudianteData.apellidos}`,
+        estudianteNombre: esDiploma ? 'Verificar datos del documento' : `${estudianteData.nombres} ${estudianteData.apellidos}`,
         error: 'No cumple los requisitos'
       });
     }
