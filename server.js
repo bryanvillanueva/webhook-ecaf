@@ -29,8 +29,12 @@ const db = mysql.createPool({
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
-    charset: 'utf8mb4'
+    charset: 'utf8mb4',
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 10000,
 });
+
+
 // Importa Socket.IO y configura el servidor HTTP
 const http = require('http');
 const server = http.createServer(app);
@@ -99,8 +103,6 @@ const authDB = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
   charset: 'utf8mb4',
-  enableKeepAlive: true,
-  keepAliveInitialDelay: 10000,
 });
 
 // Verifica la conexión a la base de datos de autenticación
@@ -163,7 +165,7 @@ app.post('/webhook', async (req, res) => {
     const userId = message.from;
 
     // Caption por defecto para imágenes sin contexto
-    const DEFAULT_IMAGE_CAPTION = "Imagen recibida - por favor procesar";
+    const DEFAULT_IMAGE_CAPTION = "brindale informacion al cliente relacionado a la imagen";
 
     // Función para enviar a Make y limpiar buffer
     const sendToMake = async (payload, webhookUrl) => {
