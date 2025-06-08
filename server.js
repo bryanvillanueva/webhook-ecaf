@@ -844,6 +844,7 @@ async function validarDuplicadoDiploma(estudianteId, tipoIdentificacion, numeroI
   }
 }
 // 4. Validación ACTUALIZADA para Diploma de Grado (usando tabla diploma)
+// VALIDACIÓN PARA DIPLOMA DE GRADO - Con actualización de valor
 async function validarDiplomaGrado(estudianteId, tipoIdentificacion, numeroIdentificacion) {
   try {
     console.log(`🎓 Validando diploma de grado para documento: ${tipoIdentificacion} ${numeroIdentificacion}`);
@@ -861,17 +862,35 @@ async function validarDiplomaGrado(estudianteId, tipoIdentificacion, numeroIdent
     }
     
     const diplomasValidos = resultadoBusqueda.diplomas;
-    
-    // Obtener información del primer diploma válido (o combinar si hay varios)
     const diplomas = diplomasValidos.map(d => `${d.tipo_diploma} - ${d.nombre_tipo_diploma}`).join(', ');
-    const valorTotal = diplomasValidos.reduce((sum, d) => sum + (Number(d.valor) || Number(d.valor_cop) || 0), 0);
+    
+    // 🎯 VALOR FIJO PARA DIPLOMA DE GRADO
+    const valorDiploma = 295680;
+    
+    // 🔄 ACTUALIZAR VALOR EN LA TABLA DIPLOMA
+    console.log(`💰 Actualizando valor de diploma de grado a: $${valorDiploma.toLocaleString()}`);
+    
+    try {
+      for (const diploma of diplomasValidos) {
+        await db.promise().query(`
+          UPDATE diploma 
+          SET valor = ?, valor_cop = ? 
+          WHERE id = ?
+        `, [valorDiploma, valorDiploma, diploma.id]);
+        
+        console.log(`✅ Valor actualizado para diploma ID: ${diploma.id} - $${valorDiploma.toLocaleString()}`);
+      }
+    } catch (updateError) {
+      console.error('❌ Error al actualizar valor en tabla diploma:', updateError.message);
+      // Continuar con el proceso aunque falle la actualización
+    }
     
     return {
       esValido: true,
       mensaje: `Diploma de grado válido para: ${diplomas}`,
       estadoInicial: 'pendiente',
-      precio: valorTotal > 0 ? valorTotal : 295680, // Usar valor de tabla o precio por defecto
-      detalles: `Se encontraron ${diplomasValidos.length} diploma(s) pendiente(s) de entrega`,
+      precio: valorDiploma, // 🎯 USAR VALOR FIJO
+      detalles: `Se encontraron ${diplomasValidos.length} diploma(s) pendiente(s) de entrega. Valor actualizado: $${valorDiploma.toLocaleString()}`,
       diplomasEncontrados: diplomasValidos
     };
     
@@ -885,7 +904,6 @@ async function validarDiplomaGrado(estudianteId, tipoIdentificacion, numeroIdent
     };
   }
 }
-
 // 5. Validación ACTUALIZADA para Duplicado de Diploma (usando tabla diploma)
 async function validarDuplicadoDiploma(estudianteId, tipoIdentificacion, numeroIdentificacion) {
   try {
@@ -904,16 +922,36 @@ async function validarDuplicadoDiploma(estudianteId, tipoIdentificacion, numeroI
     }
     
     const diplomasValidos = resultadoBusqueda.diplomas;
-    
-    // Obtener información de los diplomas
     const diplomas = diplomasValidos.map(d => `${d.tipo_diploma} - ${d.nombre_tipo_diploma}`).join(', ');
+    
+    // 🎯 VALOR FIJO PARA DUPLICADO DE DIPLOMA
+    const valorDuplicado = 90000;
+    
+    // 🔄 ACTUALIZAR VALOR EN LA TABLA DIPLOMA (opcional para duplicados)
+    console.log(`💰 Actualizando valor de duplicado de diploma a: $${valorDuplicado.toLocaleString()}`);
+    
+    try {
+      for (const diploma of diplomasValidos) {
+        // Opcional: Solo actualizar si no tiene valor, o siempre actualizar
+        await db.promise().query(`
+          UPDATE diploma 
+          SET valor = ?, valor_cop = ? 
+          WHERE id = ?
+        `, [valorDuplicado, valorDuplicado, diploma.id]);
+        
+        console.log(`✅ Valor de duplicado actualizado para diploma ID: ${diploma.id} - $${valorDuplicado.toLocaleString()}`);
+      }
+    } catch (updateError) {
+      console.error('❌ Error al actualizar valor de duplicado en tabla diploma:', updateError.message);
+      // Continuar con el proceso aunque falle la actualización
+    }
     
     return {
       esValido: true,
       mensaje: `Duplicado de diploma válido para: ${diplomas}`,
       estadoInicial: 'pendiente',
-      precio: 90000, // Precio fijo para duplicados
-      detalles: `Se encontraron ${diplomasValidos.length} diploma(s) entregado(s)`,
+      precio: valorDuplicado, // 🎯 USAR VALOR FIJO
+      detalles: `Se encontraron ${diplomasValidos.length} diploma(s) entregado(s). Valor de duplicado: $${valorDuplicado.toLocaleString()}`,
       diplomasEncontrados: diplomasValidos
     };
     
