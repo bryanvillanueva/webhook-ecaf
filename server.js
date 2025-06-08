@@ -96,9 +96,11 @@ const authDB = mysql.createPool({
   password: process.env.AUTH_DB_PASSWORD,
   database: process.env.AUTH_DB_NAME,
   waitForConnections: true,
-  connectionLimit: 5,
+  connectionLimit: 10,
   queueLimit: 0,
-  charset: 'utf8mb4'
+  charset: 'utf8mb4',
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10000,
 });
 
 // Verifica la conexión a la base de datos de autenticación
@@ -145,6 +147,7 @@ app.get('/webhook', (req, res) => {
 });
  
 // 📌 Endpoint para recibir mensajes de WhatsApp y enviarlos a Make (text, audio, image, document)
+// 📌 Endpoint para recibir mensajes de WhatsApp y enviarlos a Make (MODIFICADO)
 app.post('/webhook', async (req, res) => {
   console.log('Mensaje recibido en Webhook:', JSON.stringify(req.body, null, 2));
   const body = req.body;
@@ -158,6 +161,9 @@ app.post('/webhook', async (req, res) => {
     const message = messagesArray[0];
     const messageType = message.type;
     const userId = message.from;
+
+    // Caption por defecto para imágenes sin contexto
+    const DEFAULT_IMAGE_CAPTION = "Imagen recibida - por favor procesar";
 
     // Función para enviar a Make y limpiar buffer
     const sendToMake = async (payload, webhookUrl) => {
@@ -183,7 +189,18 @@ app.post('/webhook', async (req, res) => {
         imageMessage: message,
         textMessage: null,
         timeout: setTimeout(async () => {
-          // Pasados 20 seg sin texto, enviar solo imagen sin caption
+          // MODIFICADO: Pasados 20 seg sin texto, enviar imagen CON caption por defecto
+          console.log(`⏰ Timeout alcanzado para usuario ${userId}. Enviando imagen con caption por defecto.`);
+          
+          // Agregar caption por defecto para que el bot pueda procesar la imagen
+          const imageMessageWithDefaultCaption = {
+            ...messageBuffer[userId].imageMessage,
+            image: {
+              ...messageBuffer[userId].imageMessage.image,
+              caption: DEFAULT_IMAGE_CAPTION
+            }
+          };
+
           const payload = {
             ...body,
             entry: [{
@@ -192,11 +209,12 @@ app.post('/webhook', async (req, res) => {
                 ...body.entry[0].changes[0],
                 value: {
                   ...body.entry[0].changes[0].value,
-                  messages: [messageBuffer[userId].imageMessage]
+                  messages: [imageMessageWithDefaultCaption]
                 }
               }]
             }]
           };
+          
           await sendToMake(payload, webhookMap['image']);
           delete messageBuffer[userId];
         }, WAIT_TIME)
@@ -208,6 +226,8 @@ app.post('/webhook', async (req, res) => {
       // Si hay imagen previa en buffer para este userId, combinamos el texto como caption y enviamos
       if (messageBuffer[userId] && messageBuffer[userId].imageMessage) {
         clearTimeout(messageBuffer[userId].timeout);
+        
+        console.log(`📝 Texto recibido como contexto para imagen del usuario ${userId}: "${message.text.body}"`);
 
         // Modificamos el mensaje de imagen para agregar caption con el texto recibido
         const combinedImageMessage = {
@@ -250,7 +270,6 @@ app.post('/webhook', async (req, res) => {
     res.status(404).send('No encontrado');
   }
 });
-
 
 // 📌 Endpoint para enviar mensajes de respuesta a WhatsApp
 app.post('/send-message', async (req, res) => {
