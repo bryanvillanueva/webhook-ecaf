@@ -1092,6 +1092,8 @@ app.get('/api/certificados/:id/datos-notas', async (req, res) => {
   }
 });
 
+// Endpoint para obtener datos completos para certificado de estudio
+
 app.get('/api/certificados/:id/datos-estudio', async (req, res) => {
   try {
     const { id } = req.params;
@@ -1301,6 +1303,155 @@ function mapearTipoDocumento(tipoCertificado) {
   };
   return mapeo[tipoCertificado] || tipoCertificado;
 }
+
+
+// endpoint para obtener datos de un diploma especifico
+
+// Endpoint para obtener datos completos para diplomas
+app.get('/api/diplomas/:id/datos-diploma', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    console.log(`🔍 Solicitando datos de diploma para certificado ID: ${id}`);
+    
+    // 1. Obtener información básica del certificado
+    const [certificado] = await db.promise().query(`
+      SELECT * FROM certificados 
+      WHERE id = ?
+    `, [id]);
+    
+    if (certificado.length === 0) {
+      console.log(`❌ Certificado con ID ${id} no encontrado`);
+      return res.status(404).json({ error: `Certificado con ID ${id} no encontrado` });
+    }
+    
+    const certData = certificado[0];
+    console.log(`📋 Certificado encontrado. Tipo: "${certData.tipo_certificado}"`);
+    
+    // 2. Verificar que sea un diploma DESPUÉS de encontrarlo
+    if (!certData.tipo_certificado.toLowerCase().includes('diploma')) {
+      console.log(`❌ Tipo incorrecto. Esperado: diploma, Actual: "${certData.tipo_certificado}"`);
+      return res.status(400).json({ 
+        error: `Este endpoint es solo para diplomas`,
+        tipoActual: certData.tipo_certificado,
+        tiposEsperados: ['diploma de grado', 'duplicado de diploma']
+      });
+    }
+    
+    // 3. Buscar información del diploma en la tabla diploma (SIN mapeo - nombres completos)
+    console.log(`🎓 Buscando datos del diploma en la tabla diploma`);
+    console.log(`📋 Búsqueda: tipo="${certData.tipo_identificacion}", numero="${certData.numero_identificacion}"`);
+    
+    const [diplomas] = await db.promise().query(`
+      SELECT 
+        id,
+        nombre, 
+        apellido, 
+        tipo_identificacion, 
+        numero_identificacion,
+        tipo_diploma, 
+        nombre_tipo_diploma, 
+        modalidad, 
+        fecha_grado,
+        libro, 
+        acta, 
+        referencia, 
+        telefono, 
+        correo, 
+        estado, 
+        valor, 
+        valor_cop,
+        created_at
+      FROM diploma 
+      WHERE numero_identificacion = ? 
+      AND tipo_identificacion = ?
+    `, [certData.numero_identificacion, certData.tipo_identificacion]);
+    
+    if (diplomas.length === 0) {
+      console.log(`❌ Diploma no encontrado para: ${certData.tipo_identificacion} ${certData.numero_identificacion}`);
+      return res.status(404).json({ 
+        error: 'Información del diploma no encontrada',
+        detalles: `No se encontró diploma registrado para ${certData.tipo_identificacion}: ${certData.numero_identificacion}`,
+        certificadoInfo: {
+          id: certData.id,
+          tipo_certificado: certData.tipo_certificado,
+          referencia: certData.referencia
+        }
+      });
+    }
+    
+    // 4. Si hay múltiples diplomas, tomar el primero (más común) o el más reciente
+    const diplomaData = diplomas.length > 1 
+      ? diplomas.sort((a, b) => new Date(b.fecha_grado) - new Date(a.fecha_grado))[0]
+      : diplomas[0];
+    
+    console.log(`✅ Diploma encontrado: ${diplomaData.nombre} ${diplomaData.apellido} - ${diplomaData.nombre_tipo_diploma}`);
+    
+    // 5. Preparar respuesta completa
+    const response = {
+      certificado: {
+        id: certData.id,
+        referencia: certData.referencia,
+        nombre: certData.nombre,
+        apellido: certData.apellido,
+        tipo_identificacion: certData.tipo_identificacion,
+        numero_identificacion: certData.numero_identificacion,
+        tipo_certificado: certData.tipo_certificado,
+        correo: certData.correo,
+        telefono: certData.telefono,
+        estado_certificado: certData.estado,
+        valor_certificado: certData.valor,
+        fecha_creacion: certData.created_at
+      },
+      diploma: {
+        // Información personal
+        id: diplomaData.id,
+        nombre: diplomaData.nombre,
+        apellido: diplomaData.apellido,
+        tipo_identificacion: diplomaData.tipo_identificacion,
+        numero_identificacion: diplomaData.numero_identificacion,
+        telefono: diplomaData.telefono,
+        correo: diplomaData.correo,
+        
+        // Información académica
+        tipo_diploma: diplomaData.tipo_diploma,
+        nombre_tipo_diploma: diplomaData.nombre_tipo_diploma,
+        modalidad: diplomaData.modalidad,
+        fecha_grado: diplomaData.fecha_grado,
+        
+        // Información de registro
+        libro: diplomaData.libro,
+        acta: diplomaData.acta,
+        referencia: diplomaData.referencia,
+        estado: diplomaData.estado,
+        
+        // Información financiera
+        valor: diplomaData.valor,
+        valor_cop: diplomaData.valor_cop,
+        
+        // Metadatos
+        created_at: diplomaData.created_at
+      },
+      // Información adicional
+      coincidenciasEncontradas: diplomas.length,
+      todasLasCoincidencias: diplomas.length > 1 ? diplomas : undefined
+    };
+    
+    console.log(`✅ Respuesta preparada exitosamente para certificado ${id}`);
+    return res.json(response);
+    
+  } catch (error) {
+    console.error('❌ Error al obtener datos para diploma:', error.message);
+    console.error('❌ Stack trace:', error.stack);
+    return res.status(500).json({ 
+      error: 'Error interno del servidor al obtener datos del diploma',
+      details: error.message 
+    });
+  }
+});
+
+// fin de endpoint para obtener datos de un diploma especifico
+
 
 // Endpoint para obtener información del dashboard de certificados
 // Endpoint modificado para incluir cálculos financieros
