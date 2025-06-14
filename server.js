@@ -1334,7 +1334,7 @@ app.get('/api/diplomas/:id/datos-diploma', async (req, res) => {
       return res.status(400).json({ 
         error: `Este endpoint es solo para diplomas`,
         tipoActual: certData.tipo_certificado,
-        tiposEsperados: ['diploma de grado', 'duplicado de diploma']
+        tiposEsperados: ['diploma de grado', 'duplicado de diploma', 'duplicado de certificado de curso corto']
       });
     }
     
