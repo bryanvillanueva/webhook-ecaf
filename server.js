@@ -1328,15 +1328,21 @@ app.get('/api/diplomas/:id/datos-diploma', async (req, res) => {
     const certData = certificado[0];
     console.log(`📋 Certificado encontrado. Tipo: "${certData.tipo_certificado}"`);
     
-    // 2. Verificar que sea un diploma DESPUÉS de encontrarlo
-    if (!certData.tipo_certificado.toLowerCase().includes('diploma')) {
-      console.log(`❌ Tipo incorrecto. Esperado: diploma, Actual: "${certData.tipo_certificado}"`);
-      return res.status(400).json({ 
-        error: `Este endpoint es solo para diplomas`,
-        tipoActual: certData.tipo_certificado,
-        tiposEsperados: ['diploma de grado', 'duplicado de diploma', 'duplicado de certificado de curso corto']
-      });
-    }
+// 2. Verificar que sea un diploma O duplicado de curso corto
+const esValidoParaEsteEndpoint = (tipo) => {
+  const tipoLower = tipo.toLowerCase();
+  return tipoLower.includes('diploma') || 
+         tipoLower.includes('duplicado de certificado de curso corto');
+};
+
+if (!esValidoParaEsteEndpoint(certData.tipo_certificado)) {
+  console.log(`❌ Tipo incorrecto. Actual: "${certData.tipo_certificado}"`);
+  return res.status(400).json({ 
+    error: `Este endpoint no puede procesar este tipo de certificado`,
+    tipoActual: certData.tipo_certificado,
+    tiposEsperados: ['diploma de grado', 'duplicado de diploma', 'duplicado de certificado de curso corto']
+  });
+}
     
     // 3. Buscar información del diploma en la tabla diploma (SIN mapeo - nombres completos)
     console.log(`🎓 Buscando datos del diploma en la tabla diploma`);
