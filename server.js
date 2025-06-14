@@ -723,6 +723,150 @@ app.get('/api/dashboard-info', (req, res) => {
     });
   });
   
+// NOTIFICACIONES Y CAMBIOS DE ESTADOS EN LOS CERTIFICADOS //
+
+// Endpoint para obtener todas las notificaciones
+app.get('/api/certificados/notificaciones', (req, res) => {
+  const { limit = 50, offset = 0, unreadOnly = false } = req.query;
+  
+  let sql = `
+    SELECT n.*, c.nombre, c.apellido, c.tipo_certificado
+    FROM certificate_notifications n
+    JOIN certificados c ON n.certificate_id = c.id
+  `;
+  
+  if (unreadOnly === 'true') {
+    sql += ' WHERE n.read_status = FALSE';
+  }
+  
+  sql += ' ORDER BY n.created_at DESC LIMIT ? OFFSET ?';
+  
+  db.query(sql, [parseInt(limit), parseInt(offset)], (err, results) => {
+    if (err) {
+      console.error('❌ Error al obtener notificaciones:', err.message);
+      return res.status(500).json({ error: 'Error al obtener notificaciones' });
+    }
+    
+    res.json(results);
+  });
+});
+
+// Endpoint para marcar notificaciones como leídas
+app.put('/api/certificados/notificaciones/marcar-leidas', (req, res) => {
+  const { ids } = req.body;
+  
+  if (!ids || !Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: 'Se requiere un array de IDs' });
+  }
+  
+  const sql = 'UPDATE certificate_notifications SET read_status = TRUE WHERE id IN (?)';
+  
+  db.query(sql, [ids], (err, result) => {
+    if (err) {
+      console.error('❌ Error al marcar notificaciones como leídas:', err.message);
+      return res.status(500).json({ error: 'Error al actualizar notificaciones' });
+    }
+    
+    res.json({ 
+      message: 'Notificaciones marcadas como leídas', 
+      count: result.affectedRows 
+    });
+  });
+});
+
+// Endpoint para obtener el conteo de notificaciones no leídas
+app.get('/api/certificados/notificaciones/contador', (req, res) => {
+  const sql = 'SELECT COUNT(*) AS count FROM certificate_notifications WHERE read_status = FALSE';
+  
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error('❌ Error al obtener contador de notificaciones:', err.message);
+      return res.status(500).json({ error: 'Error al obtener contador' });
+    }
+    
+    res.json({ count: results[0].count });
+  });
+});
+
+// Sistema de polling para detectar nuevas notificaciones
+let lastNotificationId = 0; // Almacena el ID de la última notificación procesada
+
+// Función para inicializar el sistema de notificaciones
+async function initNotificationSystem() {
+  try {
+    // Obtener el ID de la última notificación actual
+    const [result] = await db.promise().query('SELECT MAX(id) as maxId FROM certificate_notifications');
+    lastNotificationId = result[0].maxId || 0;
+    
+    console.log(`✅ Sistema de notificaciones inicializado. Última notificación ID: ${lastNotificationId}`);
+    
+    // Iniciar el polling
+    startNotificationPolling();
+  } catch (error) {
+    console.error('❌ Error al inicializar sistema de notificaciones:', error.message);
+  }
+}
+
+// Función para verificar nuevas notificaciones periódicamente
+function startNotificationPolling() {
+  const POLLING_INTERVAL = 10000; // 10 segundos
+  
+  setInterval(async () => {
+    try {
+      // Consultar notificaciones más recientes que lastNotificationId
+      const query = `
+        SELECT n.*, c.nombre, c.apellido, c.tipo_certificado, c.tipo_identificacion, c.numero_identificacion
+        FROM certificate_notifications n
+        JOIN certificados c ON n.certificate_id = c.id
+        WHERE n.id > ?
+        ORDER BY n.id ASC
+      `;
+      
+      const [notifications] = await db.promise().query(query, [lastNotificationId]);
+      
+      if (notifications.length > 0) {
+        console.log(`🔔 Se encontraron ${notifications.length} nuevas notificaciones. Último ID previo: ${lastNotificationId}`);
+        
+        // Actualizar el último ID procesado
+        lastNotificationId = notifications[notifications.length - 1].id;
+        console.log(`🔄 Actualizando lastNotificationId a: ${lastNotificationId}`);
+        
+        // Emitir cada notificación a través de Socket.IO
+        notifications.forEach(notification => {
+          const notificationData = {
+            id: notification.id,
+            certificate_id: notification.certificate_id,
+            oldStatus: notification.old_status,
+            newStatus: notification.new_status,
+            clientName: `${notification.nombre} ${notification.apellido}`,
+            documentType: notification.tipo_identificacion,
+            documentNumber: notification.numero_identificacion,
+            certificateType: notification.tipo_certificado,
+            timestamp: notification.created_at
+          };
+          
+          console.log(`📣 Emitiendo notificación ID ${notification.id} para certificado ${notification.certificate_id}`);
+          io.emit('certificateStatusChanged', notificationData);
+          console.log(`✅ Notificación emitida`);
+          
+          // Verificar clientes conectados
+          const connectedClients = io.sockets.sockets.size;
+          console.log(`ℹ️ Clientes Socket.IO conectados: ${connectedClients}`);
+        });
+      } else {
+        // Opcional: log periódico para verificar que el polling está funcionando
+        console.log(`⏱️ Polling de notificaciones: sin nuevas notificaciones. Último ID: ${lastNotificationId}`);
+      }
+    } catch (error) {
+      console.error('❌ Error en el polling de notificaciones:', error.message);
+    }
+  }, POLLING_INTERVAL);
+}
+
+
+// FIN DE NOTIFICACIONES //
+
+
 
 
 // ENDPOINTS PARA LA GENERACION DE LOS CERTIFICADOS (DESCARGABLES EN PDF)
@@ -3427,145 +3571,6 @@ app.get('/api/moodle/my-role', (req, res) => {
 });
 
 
-// NOTIFICACIONES Y CAMBIOS DE ESTADOS EN LOS CERTIFICADOS //
-
-// Endpoint para obtener todas las notificaciones
-app.get('/api/certificados/notificaciones', (req, res) => {
-  const { limit = 50, offset = 0, unreadOnly = false } = req.query;
-  
-  let sql = `
-    SELECT n.*, c.nombre, c.apellido, c.tipo_certificado
-    FROM certificate_notifications n
-    JOIN certificados c ON n.certificate_id = c.id
-  `;
-  
-  if (unreadOnly === 'true') {
-    sql += ' WHERE n.read_status = FALSE';
-  }
-  
-  sql += ' ORDER BY n.created_at DESC LIMIT ? OFFSET ?';
-  
-  db.query(sql, [parseInt(limit), parseInt(offset)], (err, results) => {
-    if (err) {
-      console.error('❌ Error al obtener notificaciones:', err.message);
-      return res.status(500).json({ error: 'Error al obtener notificaciones' });
-    }
-    
-    res.json(results);
-  });
-});
-
-// Endpoint para marcar notificaciones como leídas
-app.put('/api/certificados/notificaciones/marcar-leidas', (req, res) => {
-  const { ids } = req.body;
-  
-  if (!ids || !Array.isArray(ids) || ids.length === 0) {
-    return res.status(400).json({ error: 'Se requiere un array de IDs' });
-  }
-  
-  const sql = 'UPDATE certificate_notifications SET read_status = TRUE WHERE id IN (?)';
-  
-  db.query(sql, [ids], (err, result) => {
-    if (err) {
-      console.error('❌ Error al marcar notificaciones como leídas:', err.message);
-      return res.status(500).json({ error: 'Error al actualizar notificaciones' });
-    }
-    
-    res.json({ 
-      message: 'Notificaciones marcadas como leídas', 
-      count: result.affectedRows 
-    });
-  });
-});
-
-// Endpoint para obtener el conteo de notificaciones no leídas
-app.get('/api/certificados/notificaciones/contador', (req, res) => {
-  const sql = 'SELECT COUNT(*) AS count FROM certificate_notifications WHERE read_status = FALSE';
-  
-  db.query(sql, (err, results) => {
-    if (err) {
-      console.error('❌ Error al obtener contador de notificaciones:', err.message);
-      return res.status(500).json({ error: 'Error al obtener contador' });
-    }
-    
-    res.json({ count: results[0].count });
-  });
-});
-
-// Sistema de polling para detectar nuevas notificaciones
-let lastNotificationId = 0; // Almacena el ID de la última notificación procesada
-
-// Función para inicializar el sistema de notificaciones
-async function initNotificationSystem() {
-  try {
-    // Obtener el ID de la última notificación actual
-    const [result] = await db.promise().query('SELECT MAX(id) as maxId FROM certificate_notifications');
-    lastNotificationId = result[0].maxId || 0;
-    
-    console.log(`✅ Sistema de notificaciones inicializado. Última notificación ID: ${lastNotificationId}`);
-    
-    // Iniciar el polling
-    startNotificationPolling();
-  } catch (error) {
-    console.error('❌ Error al inicializar sistema de notificaciones:', error.message);
-  }
-}
-
-// Función para verificar nuevas notificaciones periódicamente
-function startNotificationPolling() {
-  const POLLING_INTERVAL = 10000; // 10 segundos
-  
-  setInterval(async () => {
-    try {
-      // Consultar notificaciones más recientes que lastNotificationId
-      const query = `
-        SELECT n.*, c.nombre, c.apellido, c.tipo_certificado, c.tipo_identificacion, c.numero_identificacion
-        FROM certificate_notifications n
-        JOIN certificados c ON n.certificate_id = c.id
-        WHERE n.id > ?
-        ORDER BY n.id ASC
-      `;
-      
-      const [notifications] = await db.promise().query(query, [lastNotificationId]);
-      
-      if (notifications.length > 0) {
-        console.log(`🔔 Se encontraron ${notifications.length} nuevas notificaciones. Último ID previo: ${lastNotificationId}`);
-        
-        // Actualizar el último ID procesado
-        lastNotificationId = notifications[notifications.length - 1].id;
-        console.log(`🔄 Actualizando lastNotificationId a: ${lastNotificationId}`);
-        
-        // Emitir cada notificación a través de Socket.IO
-        notifications.forEach(notification => {
-          const notificationData = {
-            id: notification.id,
-            certificate_id: notification.certificate_id,
-            oldStatus: notification.old_status,
-            newStatus: notification.new_status,
-            clientName: `${notification.nombre} ${notification.apellido}`,
-            documentType: notification.tipo_identificacion,
-            documentNumber: notification.numero_identificacion,
-            certificateType: notification.tipo_certificado,
-            timestamp: notification.created_at
-          };
-          
-          console.log(`📣 Emitiendo notificación ID ${notification.id} para certificado ${notification.certificate_id}`);
-          io.emit('certificateStatusChanged', notificationData);
-          console.log(`✅ Notificación emitida`);
-          
-          // Verificar clientes conectados
-          const connectedClients = io.sockets.sockets.size;
-          console.log(`ℹ️ Clientes Socket.IO conectados: ${connectedClients}`);
-        });
-      } else {
-        // Opcional: log periódico para verificar que el polling está funcionando
-        console.log(`⏱️ Polling de notificaciones: sin nuevas notificaciones. Último ID: ${lastNotificationId}`);
-      }
-    } catch (error) {
-      console.error('❌ Error en el polling de notificaciones:', error.message);
-    }
-  }, POLLING_INTERVAL);
-}
 
 
 // CARGA DE DOCUMENTOS CON EXCEL // 
