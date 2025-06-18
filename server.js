@@ -4592,6 +4592,20 @@ app.delete('/vectors/:vectorId/objects/:objectId', async (req, res) => {
   }
 });
 
+// reutiliza la lógica existente con VECTOR_STORE_ID de process.env
+
+app.get('/vectors/objects', async (req, res) => {
+  try {
+    const response = await openai.request({
+      method: 'GET',
+      path: `/vector/stores/${VECTOR_STORE_ID}/objects`
+    });
+    res.json(response.body);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'No se pudo listar objetos' });
+  }
+});
 
 // FIN DEL ENDPOINT DE OPEN AI//
 
