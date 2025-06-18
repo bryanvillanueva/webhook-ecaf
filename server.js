@@ -4529,50 +4529,56 @@ app.get('/api/modulos/:id/estudiantes', async (req, res) => {
 // FIN NOTAS Y PROGRAMAS //
 
 // ENDPOINT DE OPEN AI PARA VECTORES
-// Listar objetos
-app.get('/vectors/objects', async (req, res) => {
+// (mantén la inicialización de `openai` y `VECTOR_STORE_ID` igual)
+
+// Listar archivos (“chunks”) del Vector Store
+app.get('/vectors/files', async (req, res) => {
   try {
     const response = await openai.request({
       method: 'GET',
-      path: `/vector_stores/${VECTOR_STORE_ID}/objects`
+      path: `/vector_stores/${VECTOR_STORE_ID}/files`
     });
+    // response.body.data será un array de vector_store_file
     res.json(response.body);
   } catch (e) {
-    console.error('Error listando objetos del vector:', e);
-    res.status(500).json({ error: 'No se pudo listar objetos' });
+    console.error('Error listando archivos del vector store:', e);
+    res.status(500).json({ error: 'No se pudo listar archivos' });
   }
 });
 
-// Agregar objetos
-app.post('/vectors/objects', async (req, res) => {
-  const { objects } = req.body;
+// Subir objetos al Vector Store (**solo** si ya sabes cómo quieres inyectar vectores manualmente;
+//  de lo contrario normalmente subes archivos con openai.files.create + vector_stores.files.create)
+app.post('/vectors/files', async (req, res) => {
+  const { file_id, attributes } = req.body; 
+  // Nota: aquí file_id es un ID de archivo que ya has subido con openai.files.create()
   try {
     const response = await openai.request({
       method: 'POST',
-      path: `/vector_stores/${VECTOR_STORE_ID}/objects`,
-      body: { objects }
+      path: `/vector_stores/${VECTOR_STORE_ID}/files`,
+      body: { file_id, attributes }
     });
     res.status(201).json(response.body);
   } catch (e) {
-    console.error('Error agregando objetos al vector:', e);
-    res.status(500).json({ error: 'No se pudo agregar objetos' });
+    console.error('Error agregando archivo al vector store:', e);
+    res.status(500).json({ error: 'No se pudo agregar archivo' });
   }
 });
 
-// Eliminar objeto
-app.delete('/vectors/objects/:objectId', async (req, res) => {
-  const objectId = req.params.objectId;
+// Eliminar un archivo del Vector Store
+app.delete('/vectors/files/:fileId', async (req, res) => {
+  const fileId = req.params.fileId;
   try {
     await openai.request({
       method: 'DELETE',
-      path: `/vector_stores/${VECTOR_STORE_ID}/objects/${objectId}`
+      path: `/vector_stores/${VECTOR_STORE_ID}/files/${fileId}`
     });
     res.status(204).send();
   } catch (e) {
-    console.error('Error eliminando objeto del vector:', e);
-    res.status(500).json({ error: 'No se pudo eliminar el objeto' });
+    console.error('Error eliminando archivo del vector store:', e);
+    res.status(500).json({ error: 'No se pudo eliminar archivo' });
   }
 });
+
 
 
 // FIN DEL ENDPOINT DE OPEN AI//
