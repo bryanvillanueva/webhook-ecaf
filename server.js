@@ -4531,35 +4531,99 @@ app.get('/api/modulos/:id/estudiantes', async (req, res) => {
 // ENDPOINT DE OPEN AI PARA VECTORES
 
 // Listar archivos
+import axios from 'axios';
+
 app.get('/vectors/files', async (req, res) => {
   try {
-    const apiRes = await axios.get(
+    // 1) Traer vector_store.files
+    const vsRes = await axios.get(
       `https://api.openai.com/v1/vector_stores/${VECTOR_STORE_ID}/files`,
       { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
     );
-    res.json(apiRes.data);
-  } catch (e) {
-    console.error(e);
+    const vsFiles = vsRes.data.data;
+
+    // 2) Traer todos los archivos subidos
+    const allRes = await axios.get(
+      'https://api.openai.com/v1/files',
+      { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
+    );
+    const allFiles = allRes.data.data;
+
+    // 3) Mapear id → filename
+    const nameMap = Object.fromEntries(allFiles.map(f => [f.id, f.filename]));
+
+    // 4) Enriquecer vsFiles con el nombre
+    const enriched = vsFiles.map(f => ({
+      ...f,
+      filename: nameMap[f.id] || '(sin nombre)'
+    }));
+
+    res.json({ data: enriched });
+  } catch (err) {
+    console.error('Error listando archivos enriquecidos:', err);
     res.status(500).json({ error: 'No se pudo listar archivos' });
   }
 });
 
-// Añadir archivo al vector store
-app.post('/vectors/files', async (req, res) => {
-  const { file_id, attributes } = req.body;
-  try {
-    const apiRes = await axios.post(
-      `https://api.openai.com/v1/vector_stores/${VECTOR_STORE_ID}/files`,
-      { file_id, attributes },
-      { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
-    );
-    res.status(201).json(apiRes.data);
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'No se pudo agregar archivo' });
-  }
-});
+// subir un archivo al vector store
+app.post(
+  '/vectors/files',
+  upload.single('file'),
+  async (req, res) => {
+    if (!req.file) {
+      return res
+        .status(400)
+        .json({ error: 'Debes enviar un fichero en el campo "file".' });
+    }
 
+    const { buffer, originalname, mimetype } = req.file;
+
+    try {
+      // 1) Subo el archivo a OpenAI Files con purpose correcto
+      const form = new FormData();
+      form.append('file', buffer, {
+        filename: originalname,
+        contentType: mimetype,
+      });
+      form.append('purpose', 'vector_store');             // <–– aquí
+
+      const fileRes = await axios.post(
+        'https://api.openai.com/v1/files',
+        form,
+        {
+          headers: {
+            ...form.getHeaders(),
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          },
+        }
+      );
+
+      const fileId = fileRes.data.id;
+
+      // 2) Asocio ese file_id a tu Vector Store, guardando el nombre
+      const vsRes = await axios.post(
+        `https://api.openai.com/v1/vector_stores/${VECTOR_STORE_ID}/files`,
+        {
+          file_id: fileId,
+          attributes: { filename: originalname },
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          },
+        }
+      );
+
+      // 3) Devuelvo la respuesta enriquecida (incluye attributes.filename)
+      res.status(201).json(vsRes.data);
+    } catch (e) {
+      console.error('Error en POST /vectors/files:', e.response?.data || e);
+      res
+        .status(500)
+        .json({ error: 'No se pudo subir el archivo al Vector Store.' });
+    }
+  }
+);
 // Borrar archivo
 app.delete('/vectors/files/:fileId', async (req, res) => {
   try {
