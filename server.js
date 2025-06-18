@@ -4626,15 +4626,26 @@ app.post(
 );
 // Borrar archivo
 app.delete('/vectors/files/:fileId', async (req, res) => {
+  const fileId = req.params.fileId;
+
   try {
+    // 1) Quitar del Vector Store
     await axios.delete(
-      `https://api.openai.com/v1/vector_stores/${VECTOR_STORE_ID}/files/${req.params.fileId}`,
+      `https://api.openai.com/v1/vector_stores/${VECTOR_STORE_ID}/files/${fileId}`,
       { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
     );
-    res.status(204).send();
+
+    // 2) Borrar el archivo de OpenAI Storage
+    await axios.delete(
+      `https://api.openai.com/v1/files/${fileId}`,
+      { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
+    );
+
+    // Si todo fue bien:
+    return res.status(204).send();
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'No se pudo eliminar archivo' });
+    console.error('Error eliminando archivo completo:', e.response?.data || e.message);
+    return res.status(500).json({ error: 'No se pudo eliminar completamente el archivo.' });
   }
 });
 
