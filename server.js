@@ -3083,7 +3083,7 @@ app.post('/api/certificados/validar-requisitos', async (req, res) => {
       estudianteId, 
       tipo_certificado, 
       tipo_identificacion, 
-      numero_identificacion
+      numeroIdentificacion
     );
     
     // Responder con el resultado de la validación
@@ -4531,7 +4531,7 @@ app.get('/api/modulos/:id/estudiantes', async (req, res) => {
 // ENDPOINT DE OPEN AI PARA VECTORES
 
 // Listar archivos
-import axios from 'axios';
+// axios ya está importado al inicio del archivo
 
 app.get('/vectors/files', async (req, res) => {
   try {
