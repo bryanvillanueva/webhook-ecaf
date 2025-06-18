@@ -9,7 +9,13 @@ const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const bcryptjs = require('bcryptjs');
 const XLSX = require('xlsx');
+const OpenAI = require('openai');
 
+// Inicializar OpenAI con la API Key desde variables de entorno
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// ID del vector store definido en tus variables de entorno
+const VECTOR_STORE_ID = process.env.VECTOR_STORE_ID;
 
 const messageBuffer = {}; // Almacena temporalmente mensajes por userId
 const WAIT_TIME = 20000; // 20 segundos
@@ -4522,11 +4528,79 @@ app.get('/api/modulos/:id/estudiantes', async (req, res) => {
 
 // FIN NOTAS Y PROGRAMAS //
 
+// ENDPOINT DE OPEN AI PARA VECTORES
+/**
+ * GET /vectors/:vectorId/objects
+ * Lista los objetos (vectores) de un vector store
+ */
+app.get('/vectors/:vectorId/objects', async (req, res) => {
+  const vectorId = req.params.vectorId || VECTOR_STORE_ID;
+  try {
+    const response = await openai.request({
+      method: 'GET',
+      path: `/vector/stores/${vectorId}/objects`
+    });
+    res.json(response.body);
+  } catch (error) {
+    console.error('Error listando objetos del vector:', error);
+    res.status(500).json({ error: 'Error al listar los objetos del vector' });
+  }
+});
+
+/**
+ * POST /vectors/:vectorId/objects
+ * Agrega uno o varios objetos (vectores) al vector store
+ * Body esperado: { objects: [{ id, vector: [números], metadata: {...} }, ...] }
+ */
+app.post('/vectors/:vectorId/objects', async (req, res) => {
+  const vectorId = req.params.vectorId || VECTOR_STORE_ID;
+  const { objects } = req.body;
+  if (!objects || !Array.isArray(objects)) {
+    return res.status(400).json({ error: 'Debes enviar un array "objects" en el body' });
+  }
+
+  try {
+    const response = await openai.request({
+      method: 'POST',
+      path: `/vector/stores/${vectorId}/objects`,
+      body: { objects }
+    });
+    res.status(201).json(response.body);
+  } catch (error) {
+    console.error('Error agregando objetos al vector:', error);
+    res.status(500).json({ error: 'Error al agregar objetos al vector' });
+  }
+});
+
+/**
+ * DELETE /vectors/:vectorId/objects/:objectId
+ * Elimina un objeto específico del vector store
+ */
+app.delete('/vectors/:vectorId/objects/:objectId', async (req, res) => {
+  const vectorId = req.params.vectorId || VECTOR_STORE_ID;
+  const objectId = req.params.objectId;
+
+  try {
+    await openai.request({
+      method: 'DELETE',
+      path: `/vector/stores/${vectorId}/objects/${objectId}`
+    });
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error eliminando objeto del vector:', error);
+    res.status(500).json({ error: 'Error al eliminar el objeto del vector' });
+  }
+});
+
+
+// FIN DEL ENDPOINT DE OPEN AI//
+
+
+
+
+
 // Iniciar el sistema de notificaciones cuando arranca la aplicación
 initNotificationSystem();
-
-
-
 
 
 // Manejo de SIGTERM para evitar cierre abrupto en Railway
