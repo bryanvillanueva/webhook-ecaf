@@ -4585,7 +4585,7 @@ app.post(
         filename: originalname,
         contentType: mimetype,
       });
-      form.append('purpose', 'vector_store');             // <–– aquí
+      form.append('purpose', 'assistants');       
 
       const fileRes = await axios.post(
         'https://api.openai.com/v1/files',
