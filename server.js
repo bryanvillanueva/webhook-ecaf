@@ -4529,71 +4529,7 @@ app.get('/api/modulos/:id/estudiantes', async (req, res) => {
 // FIN NOTAS Y PROGRAMAS //
 
 // ENDPOINT DE OPEN AI PARA VECTORES
-/**
- * GET /vectors/:vectorId/objects
- * Lista los objetos (vectores) de un vector store
- */
-app.get('/vectors/:vectorId/objects', async (req, res) => {
-  const vectorId = req.params.vectorId || VECTOR_STORE_ID;
-  try {
-    const response = await openai.request({
-      method: 'GET',
-      path: `/vector/stores/${vectorId}/objects`
-    });
-    res.json(response.body);
-  } catch (error) {
-    console.error('Error listando objetos del vector:', error);
-    res.status(500).json({ error: 'Error al listar los objetos del vector' });
-  }
-});
-
-/**
- * POST /vectors/:vectorId/objects
- * Agrega uno o varios objetos (vectores) al vector store
- * Body esperado: { objects: [{ id, vector: [números], metadata: {...} }, ...] }
- */
-app.post('/vectors/:vectorId/objects', async (req, res) => {
-  const vectorId = req.params.vectorId || VECTOR_STORE_ID;
-  const { objects } = req.body;
-  if (!objects || !Array.isArray(objects)) {
-    return res.status(400).json({ error: 'Debes enviar un array "objects" en el body' });
-  }
-
-  try {
-    const response = await openai.request({
-      method: 'POST',
-      path: `/vector/stores/${vectorId}/objects`,
-      body: { objects }
-    });
-    res.status(201).json(response.body);
-  } catch (error) {
-    console.error('Error agregando objetos al vector:', error);
-    res.status(500).json({ error: 'Error al agregar objetos al vector' });
-  }
-});
-
-/**
- * DELETE /vectors/:vectorId/objects/:objectId
- * Elimina un objeto específico del vector store
- */
-app.delete('/vectors/:vectorId/objects/:objectId', async (req, res) => {
-  const vectorId = req.params.vectorId || VECTOR_STORE_ID;
-  const objectId = req.params.objectId;
-
-  try {
-    await openai.request({
-      method: 'DELETE',
-      path: `/vector/stores/${vectorId}/objects/${objectId}`
-    });
-    res.status(204).send();
-  } catch (error) {
-    console.error('Error eliminando objeto del vector:', error);
-    res.status(500).json({ error: 'Error al eliminar el objeto del vector' });
-  }
-});
-
-// reutiliza la lógica existente con VECTOR_STORE_ID de process.env
-
+// Listar objetos del Vector Store (usa VECTOR_STORE_ID desde env)
 app.get('/vectors/objects', async (req, res) => {
   try {
     const response = await openai.request({
@@ -4602,10 +4538,42 @@ app.get('/vectors/objects', async (req, res) => {
     });
     res.json(response.body);
   } catch (e) {
-    console.error(e);
+    console.error('Error listando objetos del vector:', e);
     res.status(500).json({ error: 'No se pudo listar objetos' });
   }
 });
+
+// Agregar uno o varios objetos al Vector Store
+app.post('/vectors/objects', async (req, res) => {
+  const { objects } = req.body;
+  try {
+    const response = await openai.request({
+      method: 'POST',
+      path: `/vector/stores/${VECTOR_STORE_ID}/objects`,
+      body: { objects }
+    });
+    res.status(201).json(response.body);
+  } catch (e) {
+    console.error('Error agregando objetos al vector:', e);
+    res.status(500).json({ error: 'No se pudo agregar objetos' });
+  }
+});
+
+// Eliminar un objeto específico
+app.delete('/vectors/objects/:objectId', async (req, res) => {
+  const objectId = req.params.objectId;
+  try {
+    await openai.request({
+      method: 'DELETE',
+      path: `/vector/stores/${VECTOR_STORE_ID}/objects/${objectId}`
+    });
+    res.status(204).send();
+  } catch (e) {
+    console.error('Error eliminando objeto del vector:', e);
+    res.status(500).json({ error: 'No se pudo eliminar el objeto' });
+  }
+});
+
 
 // FIN DEL ENDPOINT DE OPEN AI//
 
