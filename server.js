@@ -4533,16 +4533,15 @@ app.get('/api/modulos/:id/estudiantes', async (req, res) => {
 app.get('/vectors/objects', async (req, res) => {
   try {
     const response = await openai.request({
-      method: 'GET',
-      path: `/vector/stores/${VECTOR_STORE_ID}/objects`
+      method: 'GET', path: `/vector/stores/${VECTOR_STORE_ID}/objects`
     });
-    res.json(response.body);
+    console.log('DEBUG Vector Store Response:', response);
+    return res.json(response.body);
   } catch (e) {
-    console.error('Error listando objetos del vector:', e);
-    res.status(500).json({ error: 'No se pudo listar objetos' });
+    console.error('Error fetching objects debug:', e);
+    res.status(500).json({ error: e.message, details: e });
   }
 });
-
 // Agregar uno o varios objetos al Vector Store
 app.post('/vectors/objects', async (req, res) => {
   const { objects } = req.body;
