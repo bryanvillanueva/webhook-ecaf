@@ -4529,26 +4529,27 @@ app.get('/api/modulos/:id/estudiantes', async (req, res) => {
 // FIN NOTAS Y PROGRAMAS //
 
 // ENDPOINT DE OPEN AI PARA VECTORES
-// Listar objetos del Vector Store (usa VECTOR_STORE_ID desde env)
+// Listar objetos
 app.get('/vectors/objects', async (req, res) => {
   try {
     const response = await openai.request({
-      method: 'GET', path: `/vector/stores/${VECTOR_STORE_ID}/objects`
+      method: 'GET',
+      path: `/vector_stores/${VECTOR_STORE_ID}/objects`
     });
-    console.log('DEBUG Vector Store Response:', response);
-    return res.json(response.body);
+    res.json(response.body);
   } catch (e) {
-    console.error('Error fetching objects debug:', e);
-    res.status(500).json({ error: e.message, details: e });
+    console.error('Error listando objetos del vector:', e);
+    res.status(500).json({ error: 'No se pudo listar objetos' });
   }
 });
-// Agregar uno o varios objetos al Vector Store
+
+// Agregar objetos
 app.post('/vectors/objects', async (req, res) => {
   const { objects } = req.body;
   try {
     const response = await openai.request({
       method: 'POST',
-      path: `/vector/stores/${VECTOR_STORE_ID}/objects`,
+      path: `/vector_stores/${VECTOR_STORE_ID}/objects`,
       body: { objects }
     });
     res.status(201).json(response.body);
@@ -4558,13 +4559,13 @@ app.post('/vectors/objects', async (req, res) => {
   }
 });
 
-// Eliminar un objeto específico
+// Eliminar objeto
 app.delete('/vectors/objects/:objectId', async (req, res) => {
   const objectId = req.params.objectId;
   try {
     await openai.request({
       method: 'DELETE',
-      path: `/vector/stores/${VECTOR_STORE_ID}/objects/${objectId}`
+      path: `/vector_stores/${VECTOR_STORE_ID}/objects/${objectId}`
     });
     res.status(204).send();
   } catch (e) {
