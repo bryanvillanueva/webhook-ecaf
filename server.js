@@ -3083,7 +3083,7 @@ app.post('/api/certificados/validar-requisitos', async (req, res) => {
       estudianteId, 
       tipo_certificado, 
       tipo_identificacion, 
-      numeroIdentificacion
+      numero_identificacion
     );
     
     // Responder con el resultado de la validación
