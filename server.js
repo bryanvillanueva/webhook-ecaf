@@ -3287,44 +3287,22 @@ app.put('/api/certificados/:id/valor', (req, res) => {
 
 // LOGIN // 
 
-// Endpoint para autenticación (inicio de sesión) usando username/email y contraseña
 app.post('/api/login', (req, res) => {
   const { username, email, password } = req.body;
   
-  // Logs para depuración (ocultar la contraseña en los logs)
   console.log('🔐 Solicitud de login recibida:', {
     username: username || 'no proporcionado',
     email: email || 'no proporcionado',
     passwordProvided: !!password
   });
 
-  // Validar que se haya proporcionado (username o email) y contraseña
+  // Validación de entrada
   if ((!username && !email) || !password) {
     console.log('❌ Faltan datos de login requeridos');
     return res.status(400).json({ error: 'Se requiere username o email y contraseña.' });
   }
 
-  // Solución rápida para el usuario admin (usar para pruebas iniciales)
-  if ((username === 'admin' || email === 'admin@ecaf.com') && password === 'Ecafadmin2024*') {
-    console.log('✅ Admin login con credenciales directas');
-    
-    // Crear un objeto de usuario simulado para el administrador
-    const adminUser = {
-      id: 1,
-      username: 'admin',
-      email: 'admin@ecaf.com',
-      firstname: 'Administrador',
-      lastname: 'ECAF',
-      role: 'admin'
-    };
-    
-    return res.json({ 
-      message: 'Inicio de sesión exitoso.', 
-      user: adminUser 
-    });
-  }
-
-  // Construir la consulta SQL según los datos enviados
+  // Construir consulta SQL
   let sqlQuery = '';
   let params = [];
   
@@ -3356,18 +3334,15 @@ app.post('/api/login', (req, res) => {
     console.log('✅ Usuario encontrado, verificando contraseña...');
     
     try {
-      // Verificación con bcryptjs - esto maneja el salting automáticamente
-      // Si el hash está en formato bcrypt ($2y$, $2a$, etc.), esto funcionará
+      // Verificación principal con bcryptjs
       const match = await bcryptjs.compare(password, user.password);
       
       if (match) {
         console.log('✅ Contraseña correcta, login exitoso para:', user.username);
         
-        // Crear copia del usuario sin la contraseña
         const userResponse = { ...user };
         delete userResponse.password;
         
-        // Devolver respuesta exitosa
         return res.json({ 
           message: 'Inicio de sesión exitoso.', 
           user: userResponse 
@@ -3375,7 +3350,7 @@ app.post('/api/login', (req, res) => {
       } else {
         console.log('❌ Contraseña incorrecta para usuario:', user.username);
         
-        // Comprobación de respaldo: comparar directamente (útil si las contraseñas no usan bcrypt)
+        // Fallback: comparación directa para contraseñas no hasheadas
         if (password === user.password) {
           console.log('✅ Contraseña correcta (verificación directa), login exitoso para:', user.username);
           
@@ -3393,7 +3368,7 @@ app.post('/api/login', (req, res) => {
     } catch (error) {
       console.error('❌ Error en verificación de contraseña:', error.message);
       
-      // Si bcryptjs.compare falla, intenta comparación directa como último recurso
+      // Fallback de emergencia
       if (password === user.password) {
         console.log('✅ Contraseña correcta (fallback), login exitoso para:', user.username);
         
