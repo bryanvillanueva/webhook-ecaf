@@ -3083,7 +3083,7 @@ app.post('/api/certificados/validar-requisitos', async (req, res) => {
       estudianteId, 
       tipo_certificado, 
       tipo_identificacion, 
-      numero_identificacion
+      numeroIdentificacion
     );
     
     // Responder con el resultado de la validación
@@ -4649,3 +4649,92 @@ process.on("SIGTERM", () => {
 // Con esto:
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`🚀 Servidor corriendo en el puerto ${PORT} con Socket.IO`));
+
+// ===============================
+// ENDPOINTS DE DIPLOMAS
+// ===============================
+
+/**
+ * GET /api/diplomas
+ * Devuelve todos los diplomas registrados en la base de datos.
+ * Incluye toda la información relevante de la tabla diploma.
+ */
+app.get('/api/diplomas', async (req, res) => {
+  try {
+    const [diplomas] = await db.promise().query(`
+      SELECT 
+        id,
+        nombre,
+        apellido,
+        tipo_identificacion,
+        numero_identificacion,
+        tipo_diploma,
+        nombre_tipo_diploma,
+        modalidad,
+        fecha_grado,
+        libro,
+        acta,
+        referencia,
+        telefono,
+        correo,
+        estado,
+        valor,
+        valor_cop,
+        created_at
+      FROM diploma
+      ORDER BY created_at DESC
+    `);
+    res.json(diplomas);
+  } catch (error) {
+    console.error('❌ Error al obtener diplomas:', error.message);
+    res.status(500).json({ error: 'Error al obtener diplomas' });
+  }
+});
+
+/**
+ * GET /api/diplomas/:id
+ * Devuelve la información de un diploma específico por su ID.
+ * Incluye todos los campos relevantes de la tabla diploma.
+ */
+app.get('/api/diplomas/:id', async (req, res) => {
+  const { id } = req.params;
+  if (!id) {
+    return res.status(400).json({ error: 'Se requiere el ID del diploma' });
+  }
+  try {
+    const [diplomas] = await db.promise().query(`
+      SELECT 
+        id,
+        nombre,
+        apellido,
+        tipo_identificacion,
+        numero_identificacion,
+        tipo_diploma,
+        nombre_tipo_diploma,
+        modalidad,
+        fecha_grado,
+        libro,
+        acta,
+        referencia,
+        telefono,
+        correo,
+        estado,
+        valor,
+        valor_cop,
+        created_at
+      FROM diploma
+      WHERE id = ?
+      LIMIT 1
+    `, [id]);
+    if (diplomas.length === 0) {
+      return res.status(404).json({ error: 'Diploma no encontrado' });
+    }
+    res.json(diplomas[0]);
+  } catch (error) {
+    console.error('❌ Error al obtener diploma:', error.message);
+    res.status(500).json({ error: 'Error al obtener diploma' });
+  }
+});
+
+// (Aquí siguen los demás endpoints de diplomas, como el de datos de diploma por certificado)
+// ...
