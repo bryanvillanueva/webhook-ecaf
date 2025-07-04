@@ -2629,15 +2629,30 @@ app.post('/api/certificados', async (req, res) => {
 
 // ENDPOINT PARA PROCESAR ESTUDIANTES EN EXCEL TAMBIÉN ACTUALIZADO
 async function procesarEstudiantes(data, resultados) {
+  // Función auxiliar para convertir serial de Excel a Date
+  function excelDateToJSDate(serial) {
+    const utc_days = Math.floor(serial - 25569);
+    const utc_value = utc_days * 86400;
+    return new Date(utc_value * 1000);
+  }
   for (const estudiante of data) {
     try {
+      // Procesar fecha de nacimiento correctamente
+      let fecha_nacimiento = estudiante.fecha_nacimiento;
+      if (typeof fecha_nacimiento === 'number') {
+        fecha_nacimiento = excelDateToJSDate(fecha_nacimiento);
+      } else if (fecha_nacimiento) {
+        fecha_nacimiento = new Date(fecha_nacimiento);
+      } else {
+        fecha_nacimiento = null;
+      }
       // Normalizar datos
       const estudianteNormalizado = {
         tipo_documento: estudiante.tipo_documento?.toString().trim(),
         numero_documento: estudiante.numero_documento?.toString().trim(),
         nombres: estudiante.nombres?.toString().trim(),
         apellidos: estudiante.apellidos?.toString().trim(),
-        fecha_nacimiento: estudiante.fecha_nacimiento ? new Date(estudiante.fecha_nacimiento) : null,
+        fecha_nacimiento,
         genero: estudiante.genero?.toString().trim(),
         email: estudiante.email?.toString().trim(),
         telefono: estudiante.telefono?.toString().trim(),
@@ -3688,15 +3703,30 @@ app.post('/api/cargar-excel', excelUpload.single('archivo'), async (req, res) =>
 
 // Función para procesar datos de estudiantes
 async function procesarEstudiantes(data, resultados) {
+  // Función auxiliar para convertir serial de Excel a Date
+  function excelDateToJSDate(serial) {
+    const utc_days = Math.floor(serial - 25569);
+    const utc_value = utc_days * 86400;
+    return new Date(utc_value * 1000);
+  }
   for (const estudiante of data) {
     try {
+      // Procesar fecha de nacimiento correctamente
+      let fecha_nacimiento = estudiante.fecha_nacimiento;
+      if (typeof fecha_nacimiento === 'number') {
+        fecha_nacimiento = excelDateToJSDate(fecha_nacimiento);
+      } else if (fecha_nacimiento) {
+        fecha_nacimiento = new Date(fecha_nacimiento);
+      } else {
+        fecha_nacimiento = null;
+      }
       // Normalizar datos
       const estudianteNormalizado = {
         tipo_documento: estudiante.tipo_documento?.toString().trim(),
         numero_documento: estudiante.numero_documento?.toString().trim(),
         nombres: estudiante.nombres?.toString().trim(),
         apellidos: estudiante.apellidos?.toString().trim(),
-        fecha_nacimiento: estudiante.fecha_nacimiento ? new Date(estudiante.fecha_nacimiento) : null,
+        fecha_nacimiento,
         genero: estudiante.genero?.toString().trim(),
         email: estudiante.email?.toString().trim(),
         telefono: estudiante.telefono?.toString().trim(),
