@@ -3822,21 +3822,60 @@ async function procesarEstudiantes(data, resultados) {
 
 // Función para procesar datos de notas, programas y materias
 async function procesarNotas(data, resultados) {
+  // Función auxiliar para convertir serial de Excel a Date
+  function excelDateToJSDate(serial) {
+    const utc_days = Math.floor(serial - 25569);
+    const utc_value = utc_days * 86400;
+    return new Date(utc_value * 1000);
+  }
   for (const registro of data) {
     try {
+      // Procesar fechas correctamente
+      let fecha_inicio_programa = registro['Fecha de Inicio'];
+      if (typeof fecha_inicio_programa === 'number') {
+        fecha_inicio_programa = excelDateToJSDate(fecha_inicio_programa);
+      } else if (fecha_inicio_programa) {
+        fecha_inicio_programa = new Date(fecha_inicio_programa);
+      } else {
+        fecha_inicio_programa = null;
+      }
+      let fecha_fin_programa = registro['Fecha de finalizacion'];
+      if (typeof fecha_fin_programa === 'number') {
+        fecha_fin_programa = excelDateToJSDate(fecha_fin_programa);
+      } else if (fecha_fin_programa) {
+        fecha_fin_programa = new Date(fecha_fin_programa);
+      } else {
+        fecha_fin_programa = null;
+      }
+      let fecha_inicio_modulo = registro['fecha de Inicio Modulo'];
+      if (typeof fecha_inicio_modulo === 'number') {
+        fecha_inicio_modulo = excelDateToJSDate(fecha_inicio_modulo);
+      } else if (fecha_inicio_modulo) {
+        fecha_inicio_modulo = new Date(fecha_inicio_modulo);
+      } else {
+        fecha_inicio_modulo = null;
+      }
+      let fecha_fin_modulo = registro['Fecha de finalizacion Modulo'];
+      if (typeof fecha_fin_modulo === 'number') {
+        fecha_fin_modulo = excelDateToJSDate(fecha_fin_modulo);
+      } else if (fecha_fin_modulo) {
+        fecha_fin_modulo = new Date(fecha_fin_modulo);
+      } else {
+        fecha_fin_modulo = null;
+      }
       // 1. Normalizar datos (usando nombres de campos del Excel)
       const registroNormalizado = {
         tipo_documento: (registro.tipo_documento || '').toString().trim(),
         numero_documento: (registro.numero_documento || '').toString().trim(),
         nombre_programa: (registro.nombre_programa || '').toString().trim(),
         incluye_modulos: parseInt(registro['Incluye modulos?'], 10) === 1,
-        fecha_inicio_programa: registro['Fecha de Inicio'] ? new Date(registro['Fecha de Inicio']) : null,
-        fecha_fin_programa: registro['Fecha de finalizacion'] ? new Date(registro['Fecha de finalizacion']) : null,
+        fecha_inicio_programa,
+        fecha_fin_programa,
         estado_programa: (registro.Estado || '').toString().trim() || 'En curso',
         tipo_de_formacion: (registro['tipo de formacion'] || '').toString().trim(),
         nombre_modulo: (registro['Nombre del modulo'] || '').toString().trim(),
-        fecha_inicio_modulo: registro['fecha de Inicio Modulo'] ? new Date(registro['fecha de Inicio Modulo']) : null,
-        fecha_fin_modulo: registro['Fecha de finalizacion Modulo'] ? new Date(registro['Fecha de finalizacion Modulo']) : null,
+        fecha_inicio_modulo,
+        fecha_fin_modulo,
         nombre_asignatura: (registro['Nombre de la Asignatura'] || '').toString().trim(),
         nota_final: parseFloat(registro['Nota Final']) || 0
       };
@@ -4074,9 +4113,24 @@ resultados.exitosos++;
 
 // NUEVA FUNCIÓN PARA PROCESAR DIPLOMAS
 async function procesarDiplomas(data, resultados) {
+  // Función auxiliar para convertir serial de Excel a Date
+  function excelDateToJSDate(serial) {
+    const utc_days = Math.floor(serial - 25569);
+    const utc_value = utc_days * 86400;
+    return new Date(utc_value * 1000);
+  }
   for (const diploma of data) {
     try {
-      // 1. Normalizar datos
+      // Procesar fecha de grado correctamente
+      let fecha_grado = diploma.fecha_grado;
+      if (typeof fecha_grado === 'number') {
+        fecha_grado = excelDateToJSDate(fecha_grado);
+      } else if (fecha_grado) {
+        fecha_grado = new Date(fecha_grado);
+      } else {
+        fecha_grado = null;
+      }
+      // Normalizar datos
       const diplomaNormalizado = {
         nombre: (diploma.nombre || '').toString().trim(),
         apellido: (diploma.apellido || '').toString().trim(),
@@ -4085,7 +4139,7 @@ async function procesarDiplomas(data, resultados) {
         tipo_diploma: (diploma.tipo_diploma || '').toString().trim(),
         nombre_tipo_diploma: (diploma.nombre_tipo_diploma || '').toString().trim(),
         modalidad: (diploma.modalidad || '').toString().trim(),
-        fecha_grado: diploma.fecha_grado ? new Date(diploma.fecha_grado) : null,
+        fecha_grado,
         libro: (diploma.libro || '').toString().trim(),
         acta: (diploma.acta || '').toString().trim(),
         referencia: (diploma.referencia || '').toString().trim(),
@@ -4191,6 +4245,7 @@ async function procesarDiplomas(data, resultados) {
             diplomaId
           ]
         );
+        
         
         console.log(`✅ Diploma actualizado: ${diplomaNormalizado.nombre} ${diplomaNormalizado.apellido} - ${diplomaNormalizado.tipo_diploma}`);
       } else {
@@ -4409,7 +4464,7 @@ app.get('/api/programas/:id/asignaturas', async (req, res) => {
 });
 
 // 📌 6. Obtener los estudiantes asociados a una asignatura (incluyendo su nota) 
-app.get('/api/asignaturas/:id/estudiantes', async (req, res) => {
+app.get('/api/asignaturas/:id/estudiantes', async (req, res) => {   
   const { id } = req.params;
   try {
     const [result] = await db.promise().query(`
